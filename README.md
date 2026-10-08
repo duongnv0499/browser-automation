@@ -69,6 +69,8 @@ uv run browser-agent connect --endpoint http://127.0.0.1:9222
 
 That command retains its session until stdin EOF. See [browser behavior and limits](docs/browser.md) and [external tools/approvals](docs/integrations.md).
 
+For direct native discovery use `uv run browser-agent connect --consent` (optionally `--profile-dir /absolute/user-data-directory`). A model-driven native task uses `uv run --env-file .env browser-agent run 'YOUR GOAL' --consent --url https://example.com`. `run` defaults to native discovery; `--isolated` is required to select an isolated browser.
+
 ## Explicit isolated browser
 
 ```bash
@@ -79,7 +81,7 @@ uv run browser-agent launch --headless
 # Paid, bounded agent task in an explicitly chosen isolated browser:
 uv run --env-file .env browser-agent run \
   'Open the Wikipedia article about browser automation; stop when its heading is visible.' \
-  --url https://en.wikipedia.org --provider openrouter --max-steps 20
+  --isolated --url https://en.wikipedia.org --provider openrouter --max-steps 20
 ```
 
 `run --endpoint http://127.0.0.1:9222` instead uses an explicit attached session. Account sign-in, CAPTCHA, and site permission prompts remain user responsibilities. No stealth/detection bypass is provided. A blocked or unapproved action is not successful completion.
