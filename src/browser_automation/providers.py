@@ -74,6 +74,12 @@ def action_window(observation: dict, limit: int = 256) -> tuple[dict[str, dict],
     selected = []
 
     def controls():
+        if observation.get("next_offset") is not None:
+            yield {"operation": "next_text"}
+        if observation.get("text_offset", 0) > 0:
+            yield {"operation": "previous_text"}
+        for tab in observation.get("available_tabs", []):
+            yield {"operation": "switch_tab", "tab_id": tab["id"]}
         for element in elements:
             target = element["id"]
             for operation in element.get("operations", []):
@@ -95,9 +101,16 @@ def action_window(observation: dict, limit: int = 256) -> tuple[dict[str, dict],
                                         yield {"operation": "refine_point", "target": target,
                                                "region": cell, "depth": depth + 1}
                 elif operation == "select":
-                    for option in element.get("options", []):
+                    options = element.get("options", [])
+                    selected_values = element.get("selected_values", [o["value"] for o in options if o.get("selected")])
+                    for option in options:
                         if not option.get("disabled") and isinstance(option.get("value"), str):
-                            yield {"operation": "select", "target": target, "value": option["value"]}
+                            value = option["value"]
+                            if element.get("multiple"):
+                                toggled = [v for v in selected_values if v != value] if value in selected_values else [*selected_values, value]
+                                yield {"operation": "select", "target": target, "value": toggled}
+                            else:
+                                yield {"operation": "select", "target": target, "value": value}
                 elif operation == "press":
                     for key in ("Enter", "Tab", "Escape", "ArrowDown", "ArrowUp"):
                         yield {"operation": "press", "target": target, "key": key}
@@ -318,11 +331,12 @@ class DecisionProvider:
         descriptions = {}
         for key, action in candidates.items():
             target = elements.get(action.get("target"), {})
-            option_label = next((o.get("label") for o in target.get("options", []) if o.get("value") == action.get("value")), None)
+            values = action.get("value")
+            option_label = [o.get("label") for o in target.get("options", []) if o.get("value") in values] if isinstance(values, list) else next((o.get("label") for o in target.get("options", []) if o.get("value") == values), None)
             descriptions[key] = json.dumps({"action": action, "role": target.get("role"),
                                             "name": target.get("name"), "value": target.get("value"), "option_label": option_label}, ensure_ascii=False)
         answer, metrics = await self._decide(observation, goal, history, "next_action",
-            "Select one compatible operation/target/value. Fill alone gets text separately. Select uses offered literal option values. next_actions/previous_actions inspect omitted actions without input. refine_point narrows a screenshot target into a cell without input; use repeatedly for precise cell-center clicks, up to six levels. Choose done only if complete; blocked if unsafe/impossible.", descriptions)
+            "Select one compatible operation/target/value. Fill alone gets text separately. Select uses offered observed values; multiple-select choices toggle one option while retaining others. next_actions/previous_actions page compatible actions; next_text/previous_text read same-revision text windows; switch_tab explicitly visits a host-observed action-created popup. These do not send browser input. refine_point narrows a screenshot target into a cell without input, up to six levels. Choose done only if complete; blocked if unsafe/impossible.", descriptions)
         return {**candidates[answer.pop("choice")], **answer, **metrics, "action_window": window}
 
     async def verify(self, observation: dict, goal: str, history: list) -> dict:

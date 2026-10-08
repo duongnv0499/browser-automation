@@ -259,3 +259,113 @@ async def test_agent_executes_observed_select_value_without_field_helper():
     result = await BrowserAgent(session, SelectProvider(satisfied=True)).run("t1", "Select Red")
     assert result["status"] == "success"
     assert session.calls == [{"operation": "select", "target": "color", "value": "red-id", "observation_id": "r1"}]
+
+@pytest.mark.asyncio
+async def test_screenshot_only_progress_does_not_trigger_no_progress():
+    class VisualSession(Session):
+        async def observe(self, tab_id, **kwargs):
+            page = obs()
+            page["screenshot"] = "pixels-" + str(len(self.calls))
+            return page
+
+    class VisualProvider(Provider):
+        async def choose(self, observation, goal, history):
+            return {"operation": "done"} if observation["screenshot"] == "pixels-5" else {"operation": "click", "target": "e1"}
+
+    session = VisualSession()
+    result = await BrowserAgent(session, VisualProvider(satisfied=True), approval=lambda _: True, no_progress_limit=2).run("t1", "Advance canvas five times")
+    assert result["status"] == "success" and len(session.calls) == 5
+
+
+@pytest.mark.asyncio
+async def test_multi_select_adds_options_without_replacing_existing_selection():
+    from browser_automation.providers import action_candidates
+
+    class MultiSession(Session):
+        selected = []
+
+        async def observe(self, tab_id, **kwargs):
+            page = obs()
+            page["elements"] = [{"id": "colors", "role": "combobox", "name": "Colors", "multiple": True,
+                                 "selected_values": self.selected, "operations": ["select"],
+                                 "options": [{"value": v, "label": v, "selected": v in self.selected} for v in ("red", "blue", "green")]}]
+            return page
+
+        async def act(self, tab_id, action):
+            self.calls.append(action)
+            self.selected = action["value"]
+            return {}
+
+    class MultiProvider(Provider):
+        async def choose(self, observation, goal, history):
+            selected = observation["elements"][0]["selected_values"]
+            if set(selected) == {"red", "blue"}:
+                return {"operation": "done"}
+            wanted = "red" if "red" not in selected else "blue"
+            return next(a for a in action_candidates(observation).values() if a["operation"] == "select" and wanted in a["value"] and len(a["value"]) == len(selected) + 1)
+
+    session = MultiSession()
+    result = await BrowserAgent(session, MultiProvider(satisfied=True)).run("t1", "Select red and blue")
+    assert result["status"] == "success"
+    assert [a["value"] for a in session.calls] == [["red"], ["red", "blue"]]
+
+
+@pytest.mark.asyncio
+async def test_popup_requires_explicit_observed_tab_switch():
+    class PopupSession(Session):
+        async def observe(self, tab_id, **kwargs):
+            return {**obs(), "tab_id": tab_id, "text": "Popup completed" if tab_id == "popup" else "Ready"}
+
+        async def act(self, tab_id, action):
+            self.calls.append((tab_id, action))
+            return {"popup_tabs": ["popup"]}
+
+        async def tabs(self):
+            return [{"id": "t1", "url": "http://local/"}, {"id": "popup", "url": "http://local/popup", "title": "Next stage"}, {"id": "unsolicited", "url": "http://local/unrelated"}]
+
+    class PopupProvider(Provider):
+        async def choose(self, observation, goal, history):
+            if observation["tab_id"] == "popup":
+                return {"operation": "done"}
+            if observation["available_tabs"]:
+                assert [t["id"] for t in observation["available_tabs"]] == ["popup"]
+                return {"operation": "switch_tab", "tab_id": "popup"}
+            return {"operation": "click", "target": "e1"}
+
+    session = PopupSession()
+    result = await BrowserAgent(session, PopupProvider(satisfied=True), approval=lambda _: True).run("t1", "Complete popup stage")
+    assert result["status"] == "success" and result["active_tab"] == "popup"
+    assert len(session.calls) == 1 and session.calls[0][0] == "t1"
+    assert result["steps"][1]["action"] == {"operation": "switch_tab", "tab_id": "popup"}
+
+
+@pytest.mark.asyncio
+async def test_text_continuation_is_reachable_and_refreshed_for_verifier():
+    class TextSession(Session):
+        revision = 0
+        reads = []
+
+        async def observe(self, tab_id, **kwargs):
+            self.revision += 1
+            return {"id": f"r{self.revision}", "tab_id": tab_id, "text": "Beginning", "elements": [],
+                    "truncated": True, "next_offset": 10, "text_length": 20, "source_truncated": False}
+
+        async def text_continuation(self, tab_id, observation_id, offset, max_text):
+            self.reads.append((observation_id, offset))
+            assert observation_id == f"r{self.revision}"
+            return {"observation_id": observation_id, "text": "Goal visibly achieved", "offset": offset,
+                    "next_offset": None, "text_length": 20, "truncated": False, "source_truncated": False}
+
+    class TextProvider(Provider):
+        async def choose(self, observation, goal, history):
+            return {"operation": "done"} if "Goal visibly achieved" in observation["text"] else {"operation": "next_text"}
+
+        async def verify(self, observation, goal, history):
+            assert observation["text"] == "Beginning"
+            assert observation["text_windows"][0]["text"] == "Goal visibly achieved"
+            return {"satisfied": True, "probability": .99}
+
+    session = TextSession()
+    result = await BrowserAgent(session, TextProvider(), max_text=10).run("t1", "Verify later visible text")
+    assert result["status"] == "success" and not session.calls
+    assert session.reads == [("r1", 10), ("r2", 10)]

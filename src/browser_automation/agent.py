@@ -20,7 +20,7 @@ class BrowserAgent:
                  max_text: int = 12000, history_limit: int = 8,
                  no_progress_limit: int = 3, verification_threshold: float = 0.9,
                  stale_limit: int = 3):
-        if max_steps < 1 or history_limit < 1 or no_progress_limit < 1 or stale_limit < 0:
+        if max_steps < 1 or history_limit < 1 or no_progress_limit < 1 or stale_limit < 0 or max_text < 1:
             raise ValueError("Agent bounds must be positive")
         if not 0 <= verification_threshold <= 1:
             raise ValueError("Verification threshold must be in [0, 1]")
@@ -45,6 +45,8 @@ class BrowserAgent:
         state = {"url": observation.get("url"), "text": observation.get("text"),
                  "action_page": observation.get("action_page", 0),
                  "point_refinements": observation.get("point_refinements", {}),
+                 "text_offset": observation.get("text_offset", 0),
+                 "screenshot_hash": hashlib.sha256(observation.get("screenshot", "").encode()).hexdigest(),
                  "elements": [{k: e.get(k) for k in ("role", "name", "value", "bounds", "operations")}
                               for e in observation.get("elements", [])]}
         return hashlib.sha256(json.dumps(state, sort_keys=True).encode()).hexdigest()
@@ -99,6 +101,8 @@ class BrowserAgent:
         last_fingerprint = None
         unchanged = 0
         stale_count = 0
+        known_tabs = {tab_id: {"id": tab_id}}
+        text_offsets: deque = deque([0], maxlen=2)
 
         def account(result: dict) -> None:
             metrics["provider_calls"] += 1
@@ -111,11 +115,23 @@ class BrowserAgent:
         async def observe() -> dict:
             begin = time.perf_counter()
             result = await self._observe(tab_id)
+            result["text_offset"] = 0
+            known_tabs[tab_id] = {"id": tab_id, "url": result.get("url"), "title": result.get("title")}
+            result["available_tabs"] = [tab for id_, tab in known_tabs.items() if id_ != tab_id]
+            text_offsets.clear()
+            text_offsets.append(0)
             metrics["browser_ms"] += (time.perf_counter() - begin) * 1000
             return result
 
+        async def read_text(offset: int) -> dict:
+            begin = time.perf_counter()
+            chunk = await self.session.text_continuation(tab_id, observation["id"], offset=offset, max_text=self.max_text)
+            metrics["browser_ms"] += (time.perf_counter() - begin) * 1000
+            return chunk
+
         try:
             observation = await observe()
+            known_tabs[tab_id] = {"id": tab_id, "url": observation.get("url"), "title": observation.get("title")}
             for _ in range(self.max_steps):
                 fingerprint = self._fingerprint(observation)
                 unchanged = unchanged + 1 if fingerprint == last_fingerprint else 0
@@ -127,11 +143,26 @@ class BrowserAgent:
                 account(decision)
                 # Validate even custom providers: no model JS/selectors/extra arguments.
                 candidates = action_candidates(observation, getattr(self.provider, "max_choices", 256))
-                action = {k: decision[k] for k in ("operation", "target", "key", "delta", "value", "x", "y", "to_target", "region", "depth") if k in decision}
+                action = {k: decision[k] for k in ("operation", "target", "key", "delta", "value", "x", "y", "to_target", "region", "depth", "tab_id") if k in decision}
                 if action not in candidates.values():
                     status, error = "blocked", "Provider chose an unobserved or unsupported action"
                     break
                 operation = action["operation"]
+                if operation in {"next_text", "previous_text"}:
+                    offset = observation["next_offset"] if operation == "next_text" else max(0, observation.get("text_offset", 0) - self.max_text)
+                    chunk = await read_text(offset)
+                    observation.update({k: v for k, v in chunk.items() if k not in {"observation_id", "offset"}})
+                    observation["text_offset"] = offset
+                    if offset not in text_offsets:
+                        text_offsets.append(offset)
+                    history.append({"operation": operation, "offset": offset, "result": "read same-revision text without browser input"})
+                    continue
+                if operation == "switch_tab":
+                    tab_id = action["tab_id"]
+                    observation = await observe()
+                    steps.append({"action": action, "result": {"active_tab": tab_id}})
+                    history.append({"operation": operation, "tab_id": tab_id, "result": "explicitly selected observed popup"})
+                    continue
                 if operation in {"next_actions", "previous_actions"}:
                     observation["action_page"] = max(0, observation.get("action_page", 0) + (1 if operation == "next_actions" else -1))
                     history.append({"operation": operation, "action_page": observation["action_page"], "result": "inspected without browser input"})
@@ -145,7 +176,16 @@ class BrowserAgent:
                     break
                 if operation == "done":
                     # Fresh evidence and a separate request, not decision confidence.
+                    offsets = list(text_offsets)
                     observation = await observe()
+                    windows = []
+                    for offset in offsets:
+                        if offset > 0:
+                            chunk = await read_text(offset)
+                            windows.append({"offset": offset, "text": chunk["text"], "next_offset": chunk.get("next_offset"), "source_truncated": chunk.get("source_truncated", False)})
+                    if windows:
+                        observation["text_windows"] = windows
+                    observation["verification_text_offsets"] = offsets
                     verification = await self.provider.verify(observation, goal, list(history))
                     account(verification)
                     status = "success" if verification.get("satisfied") is True and verification.get("probability", 0) >= self.verification_threshold else "verification_failed"
@@ -194,6 +234,11 @@ class BrowserAgent:
                 # Bounded compact history never includes screenshots or arbitrary result bodies.
                 history.append({"operation": operation, "target": action.get("target"),
                                 "url": observation.get("url"), "result": "executed"})
+                popup_ids = result.get("popup_tabs", []) if isinstance(result, dict) else []
+                if popup_ids:
+                    for tab in await self.session.tabs():
+                        if tab["id"] in popup_ids:
+                            known_tabs[tab["id"]] = tab
                 observation = await observe()
         except asyncio.CancelledError:
             status = "cancelled"
@@ -207,7 +252,7 @@ class BrowserAgent:
             self._running = False
         metrics["elapsed_ms"] = (time.perf_counter() - started) * 1000
         result = {"status": status, "steps": steps, "observation": observation,
-                  "verification": verification, "metrics": metrics}
+                  "verification": verification, "metrics": metrics, "active_tab": tab_id}
         if pending is not None:
             result["approval"] = pending
         if error is not None:
