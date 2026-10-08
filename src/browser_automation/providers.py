@@ -294,7 +294,7 @@ class DecisionProvider:
                     raise ProviderProtocolError("OpenAI probabilities must be an array")
                 converted = {}
                 for item in probabilities:
-                    if not isinstance(item, dict) or item.get("value") not in choices or item["value"] in converted:
+                    if not isinstance(item, dict) or not isinstance(item.get("value"), str) or item["value"] not in choices or item["value"] in converted:
                         raise ProviderProtocolError("Invalid OpenAI probability entry")
                     converted[item["value"]] = _probability(item.get("probability"))
                 probabilities = converted

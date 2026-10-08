@@ -238,3 +238,24 @@ def test_benign_buttons_and_activation_keys_follow_explicit_policy():
     assert BrowserAgent._approval_reason({"operation": "click", "target": "e1"}, page)
     for key in ("Control+Enter", "Return", "Space", "spacebar"):
         assert BrowserAgent._approval_reason({"operation": "press", "target": "e1", "key": key}, page)
+
+@pytest.mark.asyncio
+async def test_agent_executes_observed_select_value_without_field_helper():
+    class SelectSession(Session):
+        async def observe(self, tab_id, **kwargs):
+            page = obs(text="Red selected" if self.calls else "Choose color")
+            page["elements"] = [{"id": "color", "role": "combobox", "name": "Color", "operations": ["select"],
+                                 "options": [{"value": "red-id", "label": "Red"}]}]
+            return page
+
+    class SelectProvider(Provider):
+        async def choose(self, observation, goal, history):
+            return {"operation": "done"} if observation["text"] == "Red selected" else {"operation": "select", "target": "color", "value": "red-id"}
+
+        async def field_text(self, *args):
+            raise AssertionError("Select must never generate free-text options")
+
+    session = SelectSession()
+    result = await BrowserAgent(session, SelectProvider(satisfied=True)).run("t1", "Select Red")
+    assert result["status"] == "success"
+    assert session.calls == [{"operation": "select", "target": "color", "value": "red-id", "observation_id": "r1"}]
