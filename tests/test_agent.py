@@ -232,7 +232,7 @@ async def test_exact_pending_action_can_resume_then_verify_and_stale_is_rejected
 
 def test_benign_buttons_and_activation_keys_follow_explicit_policy():
     page = obs()
-    page["elements"][0].update(name="Search", form_method=None)
+    page["elements"][0].update(name="Search", form_method=None, input_type="submit", is_submit=False, form_action=None)
     assert BrowserAgent._approval_reason({"operation": "click", "target": "e1"}, page) is None
     page["elements"][0]["is_submit"] = True
     assert BrowserAgent._approval_reason({"operation": "click", "target": "e1"}, page)

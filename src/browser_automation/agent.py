@@ -60,11 +60,13 @@ class BrowserAgent:
         if operation in {"fill", "select"} and (element.get("sensitive") or "password" in description or re.search(r"credit.?card|payment|social security|secret|token|cvv", description)):
             return "Sensitive field input"
         if operation == "click":
-            if element.get("risky") or re.search(r"buy|pay|purchase|checkout|order|delete|remove|send|submit|publish|post|transfer|confirm|accept|authorize|sign.?in|log.?in|upload|download|subscribe|unsubscribe", description):
+            risk_description = " ".join(str(element.get(k) or "") for k in ("name", "role", "href", "form_action")).lower()
+            submits = element.get("is_submit") or element.get("input_type") == "submit" and bool(element.get("form_action"))
+            if submits or element.get("risky") or re.search(r"buy|pay|purchase|checkout|order|delete|remove|send|submit|publish|post|transfer|confirm|accept|authorize|sign.?in|log.?in|upload|download|subscribe|unsubscribe", risk_description):
                 return "Potential submission, disclosure, account change, payment, or destructive action"
             label = str(element.get("name", "")).strip().lower()
             benign = re.fullmatch(r"(?:search|find|next|previous|back|expand|collapse|open menu|close menu|menu|show more|show less|close|cancel)(?:\s+results)?", label)
-            if benign and not element.get("risky") and not element.get("is_submit") and element.get("input_type") != "submit" and str(element.get("form_method") or "").lower() != "post":
+            if benign and not element.get("risky") and not submits and str(element.get("form_method") or "").lower() != "post":
                 return None
             # Custom controls and visual-only targets cannot be classified reliably.
             if element.get("role") not in {"link", "checkbox", "radio", "tab", "option", "menuitem"}:
