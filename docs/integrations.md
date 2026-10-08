@@ -22,9 +22,11 @@ uv run browser-agent run --isolated --headless --url https://example.com 'Read t
 
 `launch`/`connect` print a session description, then accept JSON-lines commands until stdin EOF. Do not pipe only one command and expect session IDs to survive process exit. `run` is a bounded self-contained goal command and closes its connection afterward. Closing attached sessions disconnects; preexisting tabs and Chrome remain open. `close_tab` accepts only tabs owned by this worker. A tab created in an attached browser may remain open after disconnect; close it explicitly if wanted.
 
+Browser executable overrides are host policy: set `BROWSER_EXECUTABLE_PATH` before starting a worker or use the host CLI `--executable-path`. MCP cannot choose arbitrary executable paths. This does not sandbox a user who already grants an agent unrestricted shell access.
+
 ## Persistent JSON-lines CLI
 
-Start `uv run browser-agent serve`, keep its stdin/stdout open, and send one JSON object per line. Each response echoes `id` and has either `result` or `error` (`code`, `message`). Commands execute serially; session locks also serialize concurrent MCP calls for the same browser.
+Start `uv run browser-agent serve`, keep its stdin/stdout open, and send one JSON object per line. Each response echoes `id` and has either `result` or `error` (`code`, `message`). Distinct sessions can run concurrently; each session serializes commands under a lock. JSON-lines cancellation uses `{"command":"cancel","arguments":{"request_id":123}}` for an active request ID; it retains the session and unrelated requests. MCP uses standard cancellation notifications. On EOF outstanding operations are cancelled and owned resources cleaned up.
 
 ```json
 {"id":1,"command":"launch","arguments":{"headless":false}}
@@ -35,7 +37,7 @@ Start `uv run browser-agent serve`, keep its stdin/stdout open, and send one JSO
 {"id":6,"command":"close","arguments":{"session_id":"RETURNED_SESSION"}}
 ```
 
-Use fresh observations after actions. Stale/covered/wrong-tab/unsupported actions fail rather than targeting a guessed selector. Text continuation is cached at the same observation revision; 32 snapshots are retained, up to one million characters each. `source_truncated` reports the browser's source cap; `next_offset: null` means the cached text is exhausted, not a promise that every possible DOM byte was captured.
+Use fresh observations after actions. Stale/covered/wrong-tab/unsupported actions fail rather than targeting a guessed selector. Direct external `act` uses the same observed-element risk policy as autonomous runs: consequential/custom/visual controls and potentially submitting keys pause for exact host approval rather than bypassing policy. Service keeps at most 32 bounded observation metadata records, without screenshots; full text continuation delegates to the browser's revision cache. `text_length` reports the captured text length and `next_offset: null` means that cache is exhausted, not a promise that every possible DOM byte was captured. Browser cache eviction means old continuations can require a fresh observation.
 
 ## MCP stdio
 

@@ -11,20 +11,48 @@ from pathlib import Path
 from .service import BrowserService, error_payload
 
 
-async def json_lines():
-    service = BrowserService()
+async def json_lines(service=None):
+    owned = service is None
+    service = service or BrowserService()
+    tasks = {}
+    def send(response):
+        print(json.dumps(response, ensure_ascii=False), flush=True)
+    async def handle(request):
+        rid = request.get("id")
+        try:
+            result = await service.dispatch(request["command"], request.get("arguments", {}))
+            send({"id": rid, "result": result})
+        except asyncio.CancelledError:
+            send({"id": rid, "error": {"code": "cancelled", "message": "Request cancelled; session retained"}})
+        except Exception as exc:
+            send({"id": rid, "error": error_payload(exc)})
+        finally:
+            tasks.pop(rid, None)
     try:
         while line := await asyncio.to_thread(sys.stdin.readline):
             request = {}
             try:
                 request = json.loads(line)
-                result = await service.dispatch(request["command"], request.get("arguments", {}))
-                response = {"id": request.get("id"), "result": result}
+                if not isinstance(request, dict):
+                    raise ValueError("Expected request object")
+                if request.get("command") == "cancel":
+                    target = request.get("arguments", {}).get("request_id")
+                    if target in tasks:
+                        tasks[target].cancel()
+                    continue
+                rid = request.get("id")
+                if rid in tasks:
+                    raise ValueError("Duplicate pending request id")
+                tasks[rid] = asyncio.create_task(handle(request))
             except Exception as exc:
-                response = {"id": request.get("id") if isinstance(request, dict) else None, "error": error_payload(exc)}
-            print(json.dumps(response, ensure_ascii=False), flush=True)
+                send({"id": request.get("id") if isinstance(request, dict) else None, "error": error_payload(exc)})
     finally:
-        await service.close()
+        pending = list(tasks.values())
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        if owned:
+            await service.close()
 
 
 async def once(args):
@@ -40,15 +68,7 @@ async def once(args):
                 result = await service.dispatch("run", {"session_id": opened["session_id"], "tab_id": tab["id"], "goal": args.goal, "provider": args.provider, "model": args.model, "max_steps": args.max_steps})
             else:
                 print(json.dumps(opened), flush=True)
-                # Retain the service and identities for subsequent JSON-lines commands.
-                while line := await asyncio.to_thread(sys.stdin.readline):
-                    req = {}
-                    try:
-                        req = json.loads(line)
-                        result = await service.dispatch(req["command"], req.get("arguments", {}))
-                        print(json.dumps({"id": req.get("id"), "result": result}), flush=True)
-                    except Exception as exc:
-                        print(json.dumps({"id": req.get("id") if isinstance(req, dict) else None, "error": error_payload(exc)}), flush=True)
+                await json_lines(service)
                 return
         print(json.dumps(result, ensure_ascii=False), flush=True)
     finally:
@@ -105,6 +125,8 @@ def main():
         os.environ["BROWSER_NATIVE_CONSENT"] = "1"
     if getattr(args, "profile_dir", None):
         os.environ["BROWSER_NATIVE_PROFILE_DIRECTORY"] = args.profile_dir
+    if getattr(args, "executable_path", None):
+        os.environ["BROWSER_EXECUTABLE_PATH"] = args.executable_path
     if args.command == "mcp":
         from .mcp import main as mcp_main
         mcp_main()

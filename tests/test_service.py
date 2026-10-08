@@ -16,7 +16,12 @@ class Session:
         self.maximum = max(self.maximum, self.active)
         await asyncio.sleep(0.01)
         self.active -= 1
-        return {"id": "revision", "tab_id": tab_id, "text": "abcdefghij", "truncated": False, "elements": [], "screenshot": "PNG" if screenshot else None}
+        return {"id": "revision", "tab_id": tab_id, "text": "abcdefghij"[:max_text], "text_length": 10, "truncated": max_text < 10, "elements": [{"id": "button", "role": "button", "name": "Delete record"}], "screenshot": "PNG" if screenshot else None}
+    async def text_continuation(self, tab_id, observation_id, offset=0, max_text=12000):
+        end = min(offset + max_text, 10)
+        return {"text": "abcdefghij"[offset:end], "next_offset": end if end < 10 else None}
+    async def act(self, tab_id, action):
+        return {"executed": action}
     async def close(self):
         self.closed = True
     async def close_tab(self, tab_id):
@@ -75,6 +80,22 @@ def test_exact_expiring_host_approval(tmp_path, monkeypatch):
     second = BrowserService()
     path.write_text(json.dumps([{"token": "secret", "binding": binding, "expires_at": time.time() - 1}]))
     assert not second._approve(binding, "secret")
+
+@pytest.mark.asyncio
+async def test_direct_risky_action_requires_exact_host_approval(tmp_path, monkeypatch):
+    path = tmp_path / "approvals.json"
+    path.write_text("[]")
+    monkeypatch.setenv("BROWSER_APPROVALS_FILE", str(path))
+    service, session = service_with_session()
+    await service.dispatch("observe", {"session_id": "s", "tab_id": "t"})
+    action = {"observation_id": "revision", "operation": "click", "target": "button"}
+    paused = await service.dispatch("act", {"session_id": "s", "tab_id": "t", "action": action})
+    assert paused["status"] == "approval_required"
+    path.write_text(json.dumps([{"token": "host", "binding": paused["binding"], "expires_at": time.time() + 60}]))
+    resumed = await service.dispatch("approved_act", {"session_id": "s", "tab_id": "t", "observation_id": "revision", "approval_token": "host"})
+    assert resumed["executed"] == action
+    with pytest.raises(ServiceError):
+        await service.dispatch("approved_act", {"session_id": "s", "tab_id": "t", "observation_id": "revision", "approval_token": "host"})
 
 
 @pytest.mark.asyncio

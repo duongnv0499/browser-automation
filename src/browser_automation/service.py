@@ -47,7 +47,7 @@ class BrowserService:
         self.pending_actions: dict[tuple[str, str, str], dict] = {}
 
     def _approve(self, binding: dict, token: str | None = None) -> bool:
-        if not self.approvals_file:
+        if not self.approvals_file or not Path(self.approvals_file).exists():
             return False
         records = json.loads(Path(self.approvals_file).read_text())
         for record in records:
@@ -78,7 +78,10 @@ class BrowserService:
                 elif command == "connect_default":
                     browser = await BrowserSession.connect_default(profile_dir=os.environ.get("BROWSER_NATIVE_PROFILE_DIRECTORY"), consent=os.environ.get("BROWSER_NATIVE_CONSENT") == "1")
                 else:
-                    browser = await BrowserSession.launch(headless=args.get("headless", False), executable_path=args.get("executable_path"))
+                    executable = os.environ.get("BROWSER_EXECUTABLE_PATH")
+                    if args.get("executable_path") and args["executable_path"] != executable:
+                        raise ServiceError("host_policy_required", "Browser executable path must be configured by host BROWSER_EXECUTABLE_PATH")
+                    browser = await BrowserSession.launch(headless=args.get("headless", False), executable_path=executable)
                 sid = uuid.uuid4().hex[:16]
                 self.sessions[sid] = browser
                 self.locks[sid] = asyncio.Lock()
@@ -98,7 +101,7 @@ class BrowserService:
                 limit = args.get("max_text", 12000)
                 if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100000:
                     raise ServiceError("invalid_argument", "max_text must be 1..100000")
-                observation = await browser.observe(args["tab_id"], screenshot=args.get("screenshot", False), max_text=1_000_000)
+                observation = await browser.observe(args["tab_id"], screenshot=args.get("screenshot", False), max_text=limit)
                 full = dict(observation)
                 full.pop("screenshot", None)
                 key = (sid, observation["id"])
@@ -106,11 +109,7 @@ class BrowserService:
                 self.snapshots.move_to_end(key)
                 while len(self.snapshots) > 32:
                     self.snapshots.popitem(last=False)
-                result = dict(observation)
-                result["text"] = observation.get("text", "")[:limit]
-                result["truncated"] = bool(observation.get("truncated")) or len(observation.get("text", "")) > limit
-                result["text_length"] = len(observation.get("text", ""))
-                return result
+                return observation
             if command == "text":
                 snapshot = self.snapshots.get((sid, args["observation_id"]))
                 if snapshot is None:
@@ -118,12 +117,24 @@ class BrowserService:
                 offset, limit = args.get("offset", 0), args.get("limit", 12000)
                 if any(not isinstance(x, int) or isinstance(x, bool) for x in (offset, limit)) or offset < 0 or not 1 <= limit <= 100000:
                     raise ServiceError("invalid_argument", "offset must be nonnegative and limit 1..100000")
-                text = snapshot.get("text", "")
-                end = min(offset + limit, len(text))
-                return {"observation_id": args["observation_id"], "text": text[offset:end], "offset": offset,
-                        "next_offset": end if end < len(text) else None, "total": len(text), "source_truncated": snapshot.get("truncated", False)}
+                return await browser.text_continuation(snapshot["tab_id"], args["observation_id"], offset=offset, max_text=limit)
             if command == "act":
-                return await browser.act(args["tab_id"], args["action"])
+                from .agent import BrowserAgent
+                action = args["action"]
+                snapshot = self.snapshots.get((sid, action["observation_id"]))
+                if snapshot is None or snapshot["tab_id"] != args["tab_id"]:
+                    raise ServiceError("unknown_observation", "Observe this tab before acting")
+                reason = BrowserAgent._approval_reason(action, snapshot)
+                if reason:
+                    import copy
+                    binding = {"session_id": sid, "tab_id": args["tab_id"], "observation_id": action["observation_id"],
+                               "action": copy.deepcopy(action), "reason": reason}
+                    key = (sid, args["tab_id"], action["observation_id"])
+                    expiry = time.time() + 300
+                    self.pending_actions[key] = {"binding": binding, "expires_at": expiry}
+                    return {"status": "approval_required", "binding": binding, "expires_at": expiry,
+                            "host_command": "browser-agent approve --binding-file binding.json --approval-file /path/to/approvals.json", "resume_tool": "approved_act"}
+                return await browser.act(args["tab_id"], action)
             if command == "approved_act":
                 key = (sid, args["tab_id"], args["observation_id"])
                 pending = self.pending_actions.get(key)
@@ -161,6 +172,11 @@ class BrowserService:
                     result = await agent.run(args["tab_id"], args["goal"])
                     if result.get("status") == "approval_required" and result.get("approval"):
                         binding = {"session_id": sid, **result["approval"]}
+                        cached = dict(result["observation"])
+                        cached.pop("screenshot", None)
+                        self.snapshots[(sid, cached["id"])] = cached
+                        while len(self.snapshots) > 32:
+                            self.snapshots.popitem(last=False)
                         expiry = time.time() + 300
                         key = (sid, args["tab_id"], binding["observation_id"])
                         self.pending_actions[key] = {"binding": binding, "expires_at": expiry}
@@ -176,19 +192,28 @@ class BrowserService:
                 for key in list(self.snapshots):
                     if key[0] == sid:
                         del self.snapshots[key]
+                for key in list(self.pending_actions):
+                    if key[0] == sid:
+                        del self.pending_actions[key]
                 return {"closed": sid}
             raise ServiceError("unknown_command", f"Unknown command: {command}")
 
     async def close(self):
         async with self._lifecycle:
             self._closed = True
+            failures = []
             for sid, browser in list(self.sessions.items()):
                 async with self.locks[sid]:
                     try:
                         await browser.close()
+                    except Exception as exc:
+                        failures.append(exc)
                     finally:
                         self.sessions.pop(sid, None)
             self.snapshots.clear()
+            self.pending_actions.clear()
+            if failures:
+                raise ExceptionGroup("Browser cleanup failures", failures)
 
 
 def error_payload(exc: Exception) -> dict:

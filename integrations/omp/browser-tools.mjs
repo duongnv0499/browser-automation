@@ -10,22 +10,24 @@ export default function browserTools(pi) {
   function start() {
     if (worker) return;
     worker = spawn(process.env.BROWSER_AGENT_PYTHON || "python", ["-m", "browser_automation", "serve"], { stdio: ["pipe", "pipe", "ignore"], env: process.env });
-    const lines = createInterface({ input: worker.stdout });
+    const child = worker;
+    const lines = createInterface({ input: child.stdout });
     lines.on("line", line => {
       let response;
       try { response = JSON.parse(line); } catch { return; }
       const waiter = pending.get(response.id);
-      if (!waiter) return;
+      if (!waiter || waiter.child !== child) return;
       pending.delete(response.id);
       response.error ? waiter.reject(new Error(`${response.error.code}: ${response.error.message}`)) : waiter.resolve(response.result);
     });
     const fail = error => {
-      for (const waiter of pending.values()) waiter.reject(error);
-      pending.clear();
-      worker = undefined;
+      for (const [id, waiter] of pending) {
+        if (waiter.child === child) { pending.delete(id); waiter.reject(error); }
+      }
+      if (worker === child) worker = undefined;
     };
-    worker.on("error", fail);
-    worker.on("exit", code => { lines.close(); fail(new Error(`Browser worker exited (${code}); previous session IDs are invalid`)); });
+    child.on("error", fail);
+    child.on("exit", code => { lines.close(); fail(new Error(`Browser worker exited (${code}); previous session IDs are invalid`)); });
   }
   pi.registerTool({
     name: "browser_agent",
@@ -38,18 +40,18 @@ export default function browserTools(pi) {
     async execute(_id, params, signal) {
       if (signal?.aborted) throw new Error("Cancelled");
       start();
+      const child = worker;
       const id = ++sequence;
       const result = await new Promise((resolve, reject) => {
         const abort = () => {
           pending.delete(id);
-          // SIGINT lets asyncio cancel active work and run owned-resource cleanup.
-          worker?.kill("SIGINT");
-          reject(new Error("Cancelled; browser worker disconnecting, re-open session"));
+          child.stdin.write(JSON.stringify({ command: "cancel", arguments: { request_id: id } }) + "\n");
+          reject(new Error("Cancelled; browser session retained"));
         };
         signal?.addEventListener("abort", abort, { once: true });
         const finish = fn => value => { signal?.removeEventListener("abort", abort); fn(value); };
-        pending.set(id, { resolve: finish(resolve), reject: finish(reject) });
-        worker.stdin.write(JSON.stringify({ id, command: params.command, arguments: params.arguments || {} }) + "\n", error => {
+        pending.set(id, { child, resolve: finish(resolve), reject: finish(reject) });
+        child.stdin.write(JSON.stringify({ id, command: params.command, arguments: params.arguments || {} }) + "\n", error => {
           if (error) { pending.delete(id); finish(reject)(error); }
         });
       });

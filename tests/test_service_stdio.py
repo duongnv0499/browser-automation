@@ -10,7 +10,7 @@ from urllib.parse import quote
 import pytest
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.skipif(os.environ.get("BROWSER_INTEGRATION_TESTS") != "1", reason="Final integration verification opt-in")]
-PAGE = "data:text/html," + quote('<!doctype html><title>Transport proof</title><h1>Visible fixture</h1><button onclick="document.querySelector(\'h1\').textContent=\'Rendered SUCCESS\'">Update page</button>')
+PAGE = "data:text/html," + quote('<!doctype html><title>Transport proof</title><h1>Visible fixture</h1><a href="#result" onclick="document.querySelector(\'h1\').textContent=\'Rendered SUCCESS\'">Show result</a>')
 
 
 async def cli_call(process, command, arguments, identifier):
@@ -32,7 +32,7 @@ async def test_cli_persistent_real_browser(tmp_path):
         png = base64.b64decode(obs["screenshot"])
         assert png.startswith(b"\x89PNG\r\n\x1a\n")
         (tmp_path / "cli-before.png").write_bytes(png)
-        target = next(e for e in obs["elements"] if e["name"] == "Update page")
+        target = next(e for e in obs["elements"] if e["name"] == "Show result")
         await cli_call(process, "act", {**args, "action": {"observation_id": obs["id"], "operation": "click", "target": target["id"]}}, 4)
         after = await cli_call(process, "observe", {**args, "screenshot": True}, 5)
         assert "Rendered SUCCESS" in after["text"]
@@ -70,7 +70,7 @@ async def test_mcp_official_client_real_browser(tmp_path):
             assert len(images) == 1 and images[0].mimeType == "image/png"
             assert "screenshot" not in obs
             (tmp_path / "mcp-before.png").write_bytes(base64.b64decode(images[0].data))
-            target = next(e for e in obs["elements"] if e["name"] == "Update page")
+            target = next(e for e in obs["elements"] if e["name"] == "Show result")
             await call("act", {**args, "action": {"observation_id": obs["id"], "operation": "click", "target": target["id"]}})
             result, after = await call("observe", {**args, "screenshot": True})
             assert "Rendered SUCCESS" in after["text"]
