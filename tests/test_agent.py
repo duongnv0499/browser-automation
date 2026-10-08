@@ -172,3 +172,69 @@ async def test_real_browser_local_deterministic_provider_loop(tmp_path):
         server.shutdown()
         server.server_close()
         thread.join()
+
+@pytest.mark.asyncio
+async def test_agent_pages_to_late_target_without_browser_input():
+    from browser_automation.providers import action_candidates
+
+    class LargeSession(Session):
+        async def observe(self, tab_id, **kwargs):
+            page = obs(text="Searched" if self.calls else "Ready")
+            page["elements"] = [{"id": f"e{i}", "role": "button", "name": "Search", "operations": ["click"]} for i in range(120)]
+            return page
+
+    class PagingProvider(Provider):
+        async def choose(self, observation, goal, history):
+            if observation["text"] == "Searched":
+                return {"operation": "done"}
+            choices = action_candidates(observation)
+            return next((a for a in choices.values() if a.get("target") == "e119"), {"operation": "next_actions"})
+
+    session = LargeSession()
+    result = await BrowserAgent(session, PagingProvider(satisfied=True), max_steps=10).run("t1", "Search using final target")
+    assert result["status"] == "success"
+    assert len(session.calls) == 1 and session.calls[0]["target"] == "e119"
+
+
+@pytest.mark.asyncio
+async def test_exact_pending_action_can_resume_then_verify_and_stale_is_rejected():
+    class RevisionSession(Session):
+        revision = "r1"
+
+        async def observe(self, tab_id, **kwargs):
+            return obs(self.revision, "Submitted" if self.calls else "Ready")
+
+        async def act(self, tab_id, action):
+            if action["observation_id"] != self.revision:
+                class StaleObservationError(RuntimeError):
+                    code = "stale_observation"
+                raise StaleObservationError()
+            return await super().act(tab_id, action)
+
+    class ResumingProvider(Provider):
+        async def choose(self, observation, goal, history):
+            return {"operation": "done"} if observation["text"] == "Submitted" else {"operation": "click", "target": "e1"}
+
+    session = RevisionSession()
+    agent = BrowserAgent(session, ResumingProvider(satisfied=True))
+    paused = await agent.run("t1", "Submit")
+    assert paused["status"] == "approval_required"
+    await session.act("t1", paused["approval"]["action"])  # Explicit host approval of exact pending action.
+    resumed = await agent.run("t1", "Submit")
+    assert resumed["status"] == "success" and len(session.calls) == 1
+    session.calls.clear()
+    paused = await agent.run("t1", "Submit")
+    session.revision = "r2"
+    with pytest.raises(RuntimeError):
+        await session.act("t1", paused["approval"]["action"])
+    assert not session.calls
+
+
+def test_benign_buttons_and_activation_keys_follow_explicit_policy():
+    page = obs()
+    page["elements"][0].update(name="Search", form_method=None)
+    assert BrowserAgent._approval_reason({"operation": "click", "target": "e1"}, page) is None
+    page["elements"][0]["is_submit"] = True
+    assert BrowserAgent._approval_reason({"operation": "click", "target": "e1"}, page)
+    for key in ("Control+Enter", "Return", "Space", "spacebar"):
+        assert BrowserAgent._approval_reason({"operation": "press", "target": "e1", "key": key}, page)

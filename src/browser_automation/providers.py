@@ -55,30 +55,84 @@ def _probability(value: Any) -> float:
     return result
 
 
+def action_window(observation: dict, limit: int = 256) -> tuple[dict[str, dict], dict]:
+    """Bounded choices with explicit reversible paging, never lost targets."""
+    limit = min(limit, 48)
+    if limit < 12:
+        raise ProviderProtocolError("Action window requires at least 12 choices")
+    elements = observation.get("elements", [])
+    ids = [element.get("id") for element in elements]
+    if any(not isinstance(target, str) for target in ids) or len(set(ids)) != len(ids):
+        raise ProviderProtocolError("Observation has invalid or duplicate element ids")
+    id_indices = {target: index for index, target in enumerate(ids)}
+    base = [{"operation": "done"}, {"operation": "blocked"},
+            {"operation": "scroll", "delta": 600}, {"operation": "scroll", "delta": -600},
+            {"operation": "wait"}, {"operation": "back"}, {"operation": "forward"}]
+    capacity = limit - len(base) - 2
+    page = max(0, int(observation.get("action_page", 0)))
+    start = page * capacity
+    selected = []
+
+    def controls():
+        for element in elements:
+            target = element["id"]
+            for operation in element.get("operations", []):
+                if operation in {"click", "fill", "hover"}:
+                    yield {"operation": operation, "target": target}
+                    if operation == "click" and element.get("role") in {"canvas", "visual", "visual_region", "visual-region"}:
+                        refinement = observation.get("point_refinements", {}).get(target, {})
+                        b = refinement.get("bounds", element.get("bounds", {}))
+                        depth = refinement.get("depth", 0)
+                        if all(k in b for k in ("x", "y", "width", "height")):
+                            for col in range(3):
+                                for row in range(3):
+                                    cell = {"x": b["x"] + b["width"] * col / 3,
+                                            "y": b["y"] + b["height"] * row / 3,
+                                            "width": b["width"] / 3, "height": b["height"] / 3}
+                                    yield {"operation": "click", "target": target,
+                                           "x": cell["x"] + cell["width"] / 2, "y": cell["y"] + cell["height"] / 2}
+                                    if depth < 6:
+                                        yield {"operation": "refine_point", "target": target,
+                                               "region": cell, "depth": depth + 1}
+                elif operation == "select":
+                    for option in element.get("options", []):
+                        if not option.get("disabled") and isinstance(option.get("value"), str):
+                            yield {"operation": "select", "target": target, "value": option["value"]}
+                elif operation == "press":
+                    for key in ("Enter", "Tab", "Escape", "ArrowDown", "ArrowUp"):
+                        yield {"operation": "press", "target": target, "key": key}
+                elif operation == "scroll":
+                    for delta in (600, -600):
+                        yield {"operation": "scroll", "target": target, "delta": delta}
+                elif operation == "drag":
+                    yield {"operation": "_drag_group", "target": target}
+
+    total = 0
+    for action in controls():
+        if action["operation"] == "_drag_group":
+            count = max(0, len(ids) - 1)
+            source_index = id_indices[action["target"]]
+            for offset in range(max(0, start - total), min(count, start + capacity - total)):
+                index = offset if offset < source_index else offset + 1
+                selected.append({"operation": "drag", "target": action["target"], "to_target": ids[index]})
+            total += count
+        else:
+            if start <= total < start + capacity:
+                selected.append(action)
+            total += 1
+    actions = base + selected
+    if start > 0:
+        actions.append({"operation": "previous_actions"})
+    if start + capacity < total:
+        actions.append({"operation": "next_actions"})
+    metadata = {"page": page, "start": start, "count": len(selected), "total": total,
+                "omitted_before": min(start, total), "omitted_after": max(0, total - start - len(selected)),
+                "instructions": "Use next_actions/previous_actions to inspect omitted compatible targets/options; these do not send browser input."}
+    return {f"a{i}": action for i, action in enumerate(actions)}, metadata
+
+
 def action_candidates(observation: dict, limit: int = 256) -> dict[str, dict]:
-    """One joint operation/target head; no dependent speculative target questions."""
-    actions: list[dict] = [
-        {"operation": "done"}, {"operation": "blocked"},
-        {"operation": "scroll", "delta": 600},
-        {"operation": "scroll", "delta": -600},
-        {"operation": "wait"}, {"operation": "back"},
-        {"operation": "forward"},
-    ]
-    seen: set[str] = set()
-    for element in observation.get("elements", []):
-        target = element.get("id")
-        if not isinstance(target, str) or target in seen:
-            raise ProviderProtocolError("Observation has invalid or duplicate element ids")
-        seen.add(target)
-        for operation in element.get("operations", []):
-            if operation in {"click", "fill", "select", "hover"}:
-                actions.append({"operation": operation, "target": target})
-            elif operation == "press":
-                for key in ("Enter", "Tab", "Escape", "ArrowDown", "ArrowUp"):
-                    actions.append({"operation": "press", "target": target, "key": key})
-        if len(actions) > limit:
-            raise ProviderProtocolError("Too many action candidates; reduce observation element budget")
-    return {f"a{i}": action for i, action in enumerate(actions)}
+    return action_window(observation, limit)[0]
 
 
 class DecisionProvider:
@@ -93,7 +147,7 @@ class DecisionProvider:
             raise ProviderConfigurationError("Supported providers: openai/openrouter; transport: decisions")
         if not api_key:
             raise ProviderConfigurationError("Missing provider API key")
-        if timeout <= 0 or max_context_chars < 1024 or max_choices < 8:
+        if timeout <= 0 or max_context_chars < 1024 or max_choices < 12:
             raise ProviderConfigurationError("Invalid provider resource limits")
         self.provider = provider
         self.transport = transport
@@ -153,7 +207,13 @@ class DecisionProvider:
                 "probabilities": "model decision probabilities (not calibrated guarantees)"}
 
     def _context(self, observation: dict, goal: str, history: list) -> str:
-        clean = {k: v for k, v in observation.items() if k != "screenshot"}
+        candidates, metadata = action_window(observation, self.max_choices)
+        relevant = {a[k] for a in candidates.values() for k in ("target", "to_target") if k in a}
+        clean = {k: v for k, v in observation.items() if k not in {"screenshot", "elements"}}
+        clean["elements"] = [{k: v for k, v in e.items() if k != "options"}
+                             for e in observation.get("elements", []) if e["id"] in relevant]
+        clean["action_window"] = metadata
+        clean["omitted_elements"] = len(observation.get("elements", [])) - len(clean["elements"])
         context = json.dumps({"goal": goal, "untrusted_observation": clean,
                               "untrusted_recent_history": history[-8:]}, ensure_ascii=False, separators=(",", ":"))
         if len(context) > self.max_context_chars:
@@ -225,7 +285,7 @@ class DecisionProvider:
             raise ProviderProtocolError("Invalid Decisions answer")
         if answer.get("type") == "refusal" or answer.get("refusal"):
             raise ProviderRefusal("Decision provider refused the request")
-        if answer.get("type") != "choice" or answer.get("choice") not in choices:
+        if answer.get("type") != "choice" or not isinstance(answer.get("choice"), str) or answer["choice"] not in choices:
             raise ProviderProtocolError("Decision answer is not an offered choice")
         probabilities = answer.get("probabilities")
         if probabilities is not None:
@@ -253,20 +313,21 @@ class DecisionProvider:
         return {"choice": answer["choice"], "confidence": confidence, "probabilities": probabilities}, metrics
 
     async def choose(self, observation: dict, goal: str, history: list) -> dict:
-        candidates = action_candidates(observation, self.max_choices)
+        candidates, window = action_window(observation, self.max_choices)
         elements = {element["id"]: element for element in observation.get("elements", [])}
         descriptions = {}
         for key, action in candidates.items():
             target = elements.get(action.get("target"), {})
+            option_label = next((o.get("label") for o in target.get("options", []) if o.get("value") == action.get("value")), None)
             descriptions[key] = json.dumps({"action": action, "role": target.get("role"),
-                                            "name": target.get("name"), "value": target.get("value")}, ensure_ascii=False)
+                                            "name": target.get("name"), "value": target.get("value"), "option_label": option_label}, ensure_ascii=False)
         answer, metrics = await self._decide(observation, goal, history, "next_action",
-            "Select the single best next action and observed target jointly. Filling/selecting gets text in a separate call. Choose done only if complete; blocked if unsafe/impossible.", descriptions)
-        return {**candidates[answer.pop("choice")], **answer, **metrics}
+            "Select one compatible operation/target/value. Fill alone gets text separately. Select uses offered literal option values. next_actions/previous_actions inspect omitted actions without input. refine_point narrows a screenshot target into a cell without input; use repeatedly for precise cell-center clicks, up to six levels. Choose done only if complete; blocked if unsafe/impossible.", descriptions)
+        return {**candidates[answer.pop("choice")], **answer, **metrics, "action_window": window}
 
     async def verify(self, observation: dict, goal: str, history: list) -> dict:
         answer, metrics = await self._decide(observation, goal, history, "goal_verification",
-            "Independently verify the ENTIRE user goal from current visible evidence. Prior actions and claims of completion are not proof. Missing, ambiguous or truncated evidence means unsatisfied.",
+            "Independently verify the ENTIRE user goal from current visible evidence. Prior actions and completion claims are not proof. Truncation/window omission is not evidence about hidden content. Require actual relevant visible evidence for every goal condition; if missing or ambiguous choose unsatisfied. Irrelevant omitted controls alone do not negate an explicit visible outcome.",
             {"satisfied": "Entire goal visibly achieved", "unsatisfied": "Not achieved or evidence insufficient"})
         probabilities = answer["probabilities"]
         if probabilities is None:
@@ -275,8 +336,8 @@ class DecisionProvider:
 
     async def field_text(self, observation: dict, goal: str, target: str, history: list) -> str:
         element = next((e for e in observation.get("elements", []) if e.get("id") == target), None)
-        if element is None or not set(element.get("operations", [])) & {"fill", "select"}:
-            raise ProviderProtocolError("Field text requires an observed editable target")
+        if element is None or "fill" not in element.get("operations", []):
+            raise ProviderProtocolError("Field text requires an observed fill target")
         context = self._context(observation, goal, history)
         schema = {"type": "object", "properties": {"text": {"type": "string"}, "refusal": {"type": "boolean"}},
                   "required": ["text", "refusal"], "additionalProperties": False}
@@ -285,6 +346,12 @@ class DecisionProvider:
             {"role": "user", "content": context + "\nTarget: " + json.dumps(element, ensure_ascii=False)}],
             "response_format": {"type": "json_schema", "json_schema": {"name": "field_text", "strict": True, "schema": schema}},
             "max_tokens": 512}
+        if observation.get("screenshot"):
+            # Both text providers use Chat Completions image_url parts, not Decisions parts.
+            self._input(observation, context)  # Validate PNG and explicit vision consent.
+            payload["messages"][1]["content"] = [
+                {"type": "text", "text": context + "\nTarget: " + json.dumps(element, ensure_ascii=False)},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64," + observation["screenshot"]}}]
         if self.text_provider == "openrouter":
             payload["provider"] = {"require_parameters": True}
         data, latency = await self._post(self.text_endpoint, payload, self._text_key)

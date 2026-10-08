@@ -33,6 +33,9 @@ def recording_server():
                 name = next(iter(questions)) if router else questions[0]["name"]
                 values = list(questions[name]["criteria"]) if router else [c["value"] for c in questions[0]["choices"]]
                 selected = values[0]
+                if state.get("operation") and name == "next_action":
+                    descriptions = questions[name]["criteria"] if router else {c["value"]: c["description"] for c in questions[0]["choices"]}
+                    selected = next(v for v, description in descriptions.items() if json.loads(description)["action"]["operation"] == state["operation"])
                 probabilities = {v: 1.0 if v == selected else 0.0 for v in values}
                 answer = {"type": "choice", "choice": selected, "confidence": .73,
                           "probabilities": probabilities if router else [{"value": v, "probability": p} for v, p in probabilities.items()]}
@@ -94,9 +97,10 @@ async def test_exact_wire_and_field_text(recording_server, provider):
             assert isinstance(body["questions"], list)
             assert body["input"][0]["content"][1] == {"type": "input_image", "image_url": "data:image/png;base64," + PNG}
             assert "state" not in body
-        assert await client.field_text(observation(), "Find hello", "e1", []) == "hello"
+        assert await client.field_text(observation(True), "Find hello", "e1", []) == "hello"
         assert len(records) == 2
         assert records[1][1]["response_format"]["json_schema"]["strict"] is True
+        assert records[1][1]["messages"][1]["content"][1] == {"type": "image_url", "image_url": {"url": "data:image/png;base64," + PNG}}
         verification = await client.verify(observation(), "Find hello", [])
         assert verification["satisfied"] and verification["probability"] == 1
     finally:
@@ -138,3 +142,49 @@ def test_configuration_does_not_expose_secrets():
     with pytest.raises(ProviderConfigurationError) as exc:
         DecisionProvider(api_key="secret", endpoint="https://secret:secret@example.com")
     assert "secret" not in str(exc.value)
+
+@pytest.mark.asyncio
+async def test_select_value_is_decisions_choice_without_text_call(recording_server):
+    url, records, state = recording_server
+    state["operation"] = "select"
+    page = observation()
+    page["elements"] = [{"id": "s1", "role": "combobox", "name": "Color", "operations": ["select"],
+                         "options": [{"value": "red-id", "label": "Red"}, {"value": "disabled-id", "label": "No", "disabled": True}]}]
+    provider = DecisionProvider(api_key="local", endpoint=url)
+    try:
+        decision = await provider.choose(page, "Choose Red", [])
+        assert decision["operation"] == "select" and decision["value"] == "red-id"
+        assert len(records) == 1
+        choices = records[0][1]["questions"]["next_action"]["criteria"]
+        select = [json.loads(value) for value in choices.values() if json.loads(value)["action"]["operation"] == "select"]
+        assert len(select) == 1 and select[0]["option_label"] == "Red"
+    finally:
+        await provider.close()
+
+
+def test_large_action_windows_preserve_every_target_and_refine_points():
+    from browser_automation.providers import action_window
+    page = observation()
+    page["elements"] = [{"id": f"e{i}", "role": "textbox", "operations": ["fill", "press"]} for i in range(200)]
+    reached = set()
+    while True:
+        actions, metadata = action_window(page)
+        assert len(actions) <= 48
+        reached.update(a["target"] for a in actions.values() if "target" in a)
+        if not any(a["operation"] == "next_actions" for a in actions.values()):
+            break
+        assert metadata["omitted_after"] > 0
+        page["action_page"] = page.get("action_page", 0) + 1
+    assert reached == {f"e{i}" for i in range(200)}
+    canvas = {"elements": [{"id": "canvas", "role": "canvas", "operations": ["click", "drag", "scroll"],
+                            "bounds": {"x": 0, "y": 0, "width": 300, "height": 300}},
+                           {"id": "drop", "role": "visual-region", "operations": ["click"],
+                            "bounds": {"x": 400, "y": 0, "width": 30, "height": 30}}]}
+    actions, _ = action_window(canvas)
+    refine = next(a for a in actions.values() if a["operation"] == "refine_point")
+    canvas["point_refinements"] = {"canvas": {"bounds": refine["region"], "depth": refine["depth"]}}
+    refined, _ = action_window(canvas)
+    click = next(a for a in refined.values() if a["operation"] == "click" and "x" in a)
+    assert 0 < click["x"] < 100 and 0 < click["y"] < 100
+    assert any(a["operation"] == "drag" and a["to_target"] == "drop" for a in actions.values())
+    assert any(a["operation"] == "scroll" and a.get("target") == "canvas" for a in actions.values())

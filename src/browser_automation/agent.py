@@ -43,6 +43,8 @@ class BrowserAgent:
     def _fingerprint(observation: dict) -> str:
         # Revisions/timestamps change even when the page does not. IDs may be revision-local.
         state = {"url": observation.get("url"), "text": observation.get("text"),
+                 "action_page": observation.get("action_page", 0),
+                 "point_refinements": observation.get("point_refinements", {}),
                  "elements": [{k: e.get(k) for k in ("role", "name", "value", "bounds", "operations")}
                               for e in observation.get("elements", [])]}
         return hashlib.sha256(json.dumps(state, sort_keys=True).encode()).hexdigest()
@@ -52,16 +54,23 @@ class BrowserAgent:
         operation = action["operation"]
         element = next((e for e in observation.get("elements", []) if e.get("id") == action.get("target")), {})
         description = " ".join(str(element.get(k, "")) for k in ("name", "role", "type", "input_type", "href", "form_action")).lower()
-        if operation == "press" and action.get("key") == "Enter":
-            return "Enter may submit a form or confirm a consequential operation"
-        if operation in {"fill", "select"} and ("password" in description or re.search(r"credit.?card|payment|social security|secret|token|cvv", description)):
+        activation_key = str(action.get("key", "")).split("+")[-1].lower()
+        if operation == "press" and activation_key in {"enter", "return", "space", "spacebar", " "}:
+            return "Keyboard activation may submit, confirm, or activate a consequential control"
+        if operation in {"fill", "select"} and (element.get("sensitive") or "password" in description or re.search(r"credit.?card|payment|social security|secret|token|cvv", description)):
             return "Sensitive field input"
         if operation == "click":
             if element.get("risky") or re.search(r"buy|pay|purchase|checkout|order|delete|remove|send|submit|publish|post|transfer|confirm|accept|authorize|sign.?in|log.?in|upload|download|subscribe|unsubscribe", description):
                 return "Potential submission, disclosure, account change, payment, or destructive action"
+            label = str(element.get("name", "")).strip().lower()
+            benign = re.fullmatch(r"(?:search|find|next|previous|back|expand|collapse|open menu|close menu|menu|show more|show less|close|cancel)(?:\s+results)?", label)
+            if benign and not element.get("risky") and not element.get("is_submit") and element.get("input_type") != "submit" and str(element.get("form_method") or "").lower() != "post":
+                return None
             # Custom controls and visual-only targets cannot be classified reliably.
             if element.get("role") not in {"link", "checkbox", "radio", "tab", "option", "menuitem"}:
                 return "Button/custom control may have consequential side effects"
+        if operation == "drag":
+            return "Drag/drop may move, upload, or mutate content"
         return None
 
     @staticmethod
@@ -116,11 +125,19 @@ class BrowserAgent:
                 account(decision)
                 # Validate even custom providers: no model JS/selectors/extra arguments.
                 candidates = action_candidates(observation, getattr(self.provider, "max_choices", 256))
-                action = {k: decision[k] for k in ("operation", "target", "key", "delta") if k in decision}
+                action = {k: decision[k] for k in ("operation", "target", "key", "delta", "value", "x", "y", "to_target", "region", "depth") if k in decision}
                 if action not in candidates.values():
                     status, error = "blocked", "Provider chose an unobserved or unsupported action"
                     break
                 operation = action["operation"]
+                if operation in {"next_actions", "previous_actions"}:
+                    observation["action_page"] = max(0, observation.get("action_page", 0) + (1 if operation == "next_actions" else -1))
+                    history.append({"operation": operation, "action_page": observation["action_page"], "result": "inspected without browser input"})
+                    continue
+                if operation == "refine_point":
+                    observation.setdefault("point_refinements", {})[action["target"]] = {"bounds": action["region"], "depth": action["depth"]}
+                    history.append({"operation": operation, "target": action["target"], "region": action["region"], "result": "refined without browser input"})
+                    continue
                 if operation == "blocked":
                     status = "blocked"
                     break
@@ -132,10 +149,10 @@ class BrowserAgent:
                     status = "success" if verification.get("satisfied") is True and verification.get("probability", 0) >= self.verification_threshold else "verification_failed"
                     break
                 action["observation_id"] = observation["id"]
-                if operation in {"fill", "select"}:
+                if operation == "fill":
                     text = await self.provider.field_text(observation, goal, action["target"], list(history))
                     account(getattr(self.provider, "last_metrics", {}))
-                    action["text" if operation == "fill" else "value"] = text
+                    action["text"] = text
                 reason = self._approval_reason(action, observation)
                 if reason:
                     binding = hashlib.sha256(json.dumps({"tab_id": tab_id, "action": action}, sort_keys=True).encode()).hexdigest()
