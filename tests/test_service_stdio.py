@@ -6,11 +6,15 @@ import base64
 import json
 import os
 import sys
+import time
 import pytest_asyncio
 import pytest
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.skipif(os.environ.get("BROWSER_INTEGRATION_TESTS") != "1", reason="Final integration verification opt-in")]
-HTML = '<!doctype html><title>Transport proof</title><h1>Visible fixture</h1><a href="#result" onclick="document.querySelector(\'h1\').textContent=\'Rendered SUCCESS\'">Show result</a>'.encode()
+HTML = '''<!doctype html><title>Transport proof</title><h1>Visible fixture</h1>
+<a href="#result" onclick="document.querySelector('h1').textContent='Rendered SUCCESS'">Show result</a>
+<h2>Drag pending</h2><a href="#source" draggable="true" ondragend="document.querySelector('h2').textContent='Dragged SUCCESS'">Move item</a>
+<a href="#drop" style="display:inline-block;margin-left:100px;padding:40px" ondragover="event.preventDefault()">Drop zone</a>'''.encode()
 
 @pytest_asyncio.fixture
 async def local_page():
@@ -70,13 +74,17 @@ async def test_cli_persistent_real_browser(tmp_path, local_page):
 async def test_mcp_official_client_real_browser(tmp_path, local_page):
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
-    params = StdioServerParameters(command=sys.executable, args=["-m", "browser_automation.mcp"])
+    approval_path = tmp_path / "approvals.json"
+    approval_path.write_text("[]")
+    params = StdioServerParameters(command=sys.executable, args=["-m", "browser_automation.mcp"], env={**os.environ, "BROWSER_APPROVALS_FILE": str(approval_path)})
     async with stdio_client(params) as (reader, writer):
         async with ClientSession(reader, writer) as client:
             initialized = await client.initialize()
             assert initialized.serverInfo.name == "browser-automation"
             tools = await client.list_tools()
             assert {"observe", "act", "connect_default", "approved_act"} <= {tool.name for tool in tools.tools}
+            action_properties = next(t.inputSchema for t in tools.tools if t.name == "act")["properties"]["action"]["properties"]
+            assert {"to_target", "to_x", "to_y", "delta_x", "delta_y", "seconds"} <= set(action_properties)
             async def call(name, arguments):
                 result = await client.call_tool(name, arguments)
                 assert not result.isError, result
@@ -99,6 +107,47 @@ async def test_mcp_official_client_real_browser(tmp_path, local_page):
             result, after = await call("observe", {**args, "screenshot": True})
             assert "Rendered SUCCESS" in after["text"]
             (tmp_path / "mcp-after.png").write_bytes(base64.b64decode(next(b.data for b in result.content if b.type == "image")))
+            source = next(e for e in after["elements"] if e["name"] == "Move item")
+            destination = next(e for e in after["elements"] if e["name"] == "Drop zone")
+            action = {"observation_id": after["id"], "operation": "drag", "target": source["id"], "to_target": destination["id"]}
+            _, paused = await call("act", {**args, "action": action})
+            assert paused["status"] == "approval_required"
+            approval_path.write_text(json.dumps([{"token": "host-drag-fixture", "binding": paused["binding"], "expires_at": time.time() + 60}]))
+            await call("approved_act", {**args, "observation_id": after["id"], "approval_token": "host-drag-fixture"})
+            result, dragged = await call("observe", {**args, "screenshot": True})
+            assert "Dragged SUCCESS" in dragged["text"]
+            (tmp_path / "mcp-dragged.png").write_bytes(base64.b64decode(next(b.data for b in result.content if b.type == "image")))
             failed = await client.call_tool("tabs", {"session_id": "missing"})
             assert failed.isError and "unknown_session" in failed.content[0].text
             await call("close", {"session_id": sid})
+
+@pytest.mark.parametrize("flags", [[], ["--no-screenshot"]])
+async def test_cli_text_only_local_decisions_loop(local_page, flags):
+    requests = []
+    async def decide(reader, writer):
+        try:
+            headers = (await reader.readuntil(b"\r\n\r\n")).decode()
+            length = next(int(line.split(":", 1)[1]) for line in headers.split("\r\n") if line.lower().startswith("content-length:"))
+            payload = json.loads(await reader.readexactly(length))
+            requests.append(payload)
+            assert isinstance(payload["state"], str), "Text-only mode must not transmit visual input"
+            name, question = next(iter(payload["questions"].items()))
+            choices = question["criteria"]
+            choice = "satisfied" if name == "goal_verification" else next(value for value, description in choices.items() if json.loads(description)["action"]["operation"] == "done")
+            body = json.dumps({"answers": {name: {"type": "choice", "choice": choice, "confidence": 1.0, "probabilities": {value: float(value == choice) for value in choices}}}}).encode()
+            writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body)
+            await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+    server = await asyncio.start_server(decide, "127.0.0.1", 0)
+    async with server:
+        endpoint = f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}/decisions"
+        env = {**os.environ, "OPENROUTER_API_KEY": "local-test-fixture-not-live", "BROWSER_AGENT_VISION": "false", "BROWSER_AGENT_DECISIONS_ENDPOINT": endpoint}
+        process = await asyncio.create_subprocess_exec(sys.executable, "-m", "browser_automation", "run", "--isolated", "--headless", "--url", local_page, *flags, "Read the Visible fixture page", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env)
+        output, errors = await asyncio.wait_for(process.communicate(), 45)
+    assert process.returncode == 0, errors.decode()
+    result = json.loads(output)
+    assert result["status"] == "success" and result["verification"]["satisfied"]
+    assert "screenshot" not in result["observation"]
+    assert {next(iter(request["questions"])) for request in requests} == {"next_action", "goal_verification"}

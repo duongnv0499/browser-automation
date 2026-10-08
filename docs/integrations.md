@@ -22,6 +22,8 @@ uv run browser-agent run --consent --url https://example.com 'Read the example d
 uv run browser-agent run --isolated --headless --url https://example.com 'Read the example domain page'
 ```
 
+Autonomous screenshot mode defaults to the provider's declared vision capability, including `BROWSER_AGENT_VISION=false`. The CLI can explicitly override with `--no-screenshot` or `--screenshot`; supplying images to a text-only provider is an explicit configuration error. Example: `uv run browser-agent run --isolated --headless --no-screenshot --url https://example.com 'Read the example domain page'`.
+
 `launch`/`connect` print a session description, then accept JSON-lines commands until stdin EOF. Do not pipe only one command and expect session IDs to survive process exit. `run` is a bounded self-contained goal command and closes its connection afterward. Closing attached sessions disconnects; preexisting tabs and Chrome remain open. `close_tab` accepts only tabs owned by this worker. A tab created in an attached browser may remain open after disconnect; close it explicitly if wanted.
 
 Browser executable overrides are host policy: set `BROWSER_EXECUTABLE_PATH` before starting a worker or use the host CLI `--executable-path`. MCP cannot choose arbitrary executable paths. This does not sandbox a user who already grants an agent unrestricted shell access.
@@ -39,7 +41,7 @@ Start `uv run browser-agent serve`, keep its stdin/stdout open, and send one JSO
 {"id":6,"command":"close","arguments":{"session_id":"RETURNED_SESSION"}}
 ```
 
-Use fresh observations after actions. Stale/covered/wrong-tab/unsupported actions fail rather than targeting a guessed selector. Direct external `act` uses the same observed-element risk policy as autonomous runs: consequential/custom/visual controls and potentially submitting keys pause for exact host approval rather than bypassing policy. Service keeps at most 32 bounded observation metadata records, without screenshots; full text continuation delegates to the browser's revision cache. `text_length` reports the captured text length and `next_offset: null` means that cache is exhausted, not a promise that every possible DOM byte was captured. Browser cache eviction means old continuations can require a fresh observation.
+Use fresh observations after actions. Stale/covered/wrong-tab/unsupported actions fail rather than targeting a guessed selector. Direct external `act` uses the same observed-element risk policy as autonomous runs: consequential/custom/visual controls and potentially submitting keys pause for exact host approval rather than bypassing policy. Service keeps at most eight bounded observation metadata records globally, without screenshots; each browser session also retains eight revisions, so browser operations performed during `run` can evict earlier external snapshots. Full text continuation delegates to that browser revision cache. `text_length` reports the captured prefix length; `source_truncated` means source beyond the hard safety cap was omitted, and `next_offset: null` means the cache is exhausted, not that every DOM byte was captured. Evicted revisions require a fresh observation.
 
 ## MCP stdio
 

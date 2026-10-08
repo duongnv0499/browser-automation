@@ -14,7 +14,15 @@ B = {"type": "boolean"}
 I = {"type": "integer"}
 SESSION = {"session_id": S}
 TAB = {**SESSION, "tab_id": S}
-ACTION = schema({"observation_id": S, "operation": {"type": "string", "enum": ["click", "fill", "select", "scroll", "press", "hover", "drag", "wait", "back", "forward"]}, "target": S, "text": S, "value": S, "key": S, "x": {"type": "number"}, "y": {"type": "number"}, "delta": {"type": "number"}}, ("observation_id", "operation"))
+N = {"type": "number"}
+ACTION = schema({
+    "observation_id": S,
+    "operation": {"type": "string", "enum": ["click", "fill", "select", "scroll", "press", "hover", "drag", "wait", "back", "forward"]},
+    "target": S, "to_target": S, "text": S,
+    "value": {"anyOf": [S, {"type": "array", "items": S, "minItems": 1}]},
+    "key": S, "x": N, "y": N, "to_x": N, "to_y": N,
+    "delta": N, "delta_x": N, "delta_y": N, "seconds": N,
+}, ("observation_id", "operation"))
 TOOLS = [
     ("doctor", "Dependency/key presence only; no keys or page data.", schema()),
     ("launch", "Launch isolated browser; not your logged-in profile. Executable is host-configured only.", schema({"headless": B})),

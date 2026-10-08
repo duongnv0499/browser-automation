@@ -24,6 +24,8 @@ class Session:
         return {"executed": action}
     async def tabs(self):
         return [{"id": "t", "url": "https://example.com", "title": "Test"}]
+    async def tab_url(self, tab_id):
+        return "https://example.com"
     async def close(self):
         self.closed = True
     async def close_tab(self, tab_id):
@@ -144,10 +146,27 @@ async def test_external_prohibited_url_denied_before_navigation(url):
 @pytest.mark.asyncio
 async def test_existing_attached_local_file_not_observed():
     service, session = service_with_session()
-    async def tabs():
-        return [{"id": "t", "url": "file:///tmp/private-key", "title": "Private"}]
-    session.tabs = tabs
+    async def tab_url(tab_id):
+        return "file:///tmp/private-key"
+    session.tab_url = tab_url
     with pytest.raises(ServiceError) as error:
         await service.dispatch("observe", {"session_id": "s", "tab_id": "t"})
     assert error.value.code == "prohibited_url"
     assert session.maximum == 0
+
+@pytest.mark.asyncio
+async def test_closed_sessions_release_locks_and_pending_state():
+    service, session = service_with_session()
+    await service.dispatch("observe", {"session_id": "s", "tab_id": "t"})
+    await service.dispatch("act", {"session_id": "s", "tab_id": "t", "action": {"observation_id": "revision", "operation": "click", "target": "button"}})
+    assert service.pending_actions and service.snapshots and service.locks
+    await service.dispatch("close", {"session_id": "s"})
+    assert not service.sessions and not service.locks and not service.snapshots and not service.pending_actions
+
+@pytest.mark.asyncio
+async def test_targeted_url_check_does_not_enumerate_other_tabs():
+    service, session = service_with_session()
+    async def forbidden_tabs():
+        raise AssertionError("Unrelated tab title reads are not needed")
+    session.tabs = forbidden_tabs
+    await service.dispatch("observe", {"session_id": "s", "tab_id": "t"})

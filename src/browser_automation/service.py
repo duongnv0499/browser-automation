@@ -100,10 +100,7 @@ class BrowserService:
             if browser is None:
                 raise ServiceError("unknown_session", "Session has closed")
             if command in {"observe", "act", "approved_act", "run", "upload", "download"}:
-                tab = next((tab for tab in await browser.tabs() if tab["id"] == args["tab_id"]), None)
-                if tab is None:
-                    raise ServiceError("unknown_tab", "Tab is not in this session")
-                web_url(tab["url"])
+                web_url(await browser.tab_url(args["tab_id"]))
             if command == "tabs":
                 return {"tabs": await browser.tabs()}
             if command == "new_tab":
@@ -118,7 +115,7 @@ class BrowserService:
                 key = (sid, observation["id"])
                 self.snapshots[key] = full
                 self.snapshots.move_to_end(key)
-                while len(self.snapshots) > 32:
+                while len(self.snapshots) > 8:
                     self.snapshots.popitem(last=False)
                 return observation
             if command == "text":
@@ -143,6 +140,8 @@ class BrowserService:
                     key = (sid, args["tab_id"], action["observation_id"])
                     expiry = time.time() + 300
                     self.pending_actions[key] = {"binding": binding, "expires_at": expiry}
+                    while len(self.pending_actions) > 8:
+                        self.pending_actions.pop(next(iter(self.pending_actions)))
                     return {"status": "approval_required", "binding": binding, "expires_at": expiry,
                             "host_command": "browser-agent approve --binding-file binding.json --approval-file /path/to/approvals.json", "resume_tool": "approved_act"}
                 return await browser.act(args["tab_id"], action)
@@ -179,18 +178,23 @@ class BrowserService:
                     return self._approve({"session_id": sid, **request})
                 provider = DecisionProvider.from_env(provider=args.get("provider", "openrouter"), model=args.get("model"))
                 try:
-                    agent = BrowserAgent(browser, provider, max_steps=args.get("max_steps", 50), approval=approve, screenshot=args.get("screenshot", True))
+                    screenshot = args.get("screenshot")
+                    if screenshot is None:
+                        screenshot = provider.capabilities["vision"]
+                    agent = BrowserAgent(browser, provider, max_steps=args.get("max_steps", 50), approval=approve, screenshot=screenshot)
                     result = await agent.run(args["tab_id"], args["goal"])
                     if result.get("status") == "approval_required" and result.get("approval"):
                         binding = {"session_id": sid, **result["approval"]}
                         cached = dict(result["observation"])
                         cached.pop("screenshot", None)
                         self.snapshots[(sid, cached["id"])] = cached
-                        while len(self.snapshots) > 32:
+                        while len(self.snapshots) > 8:
                             self.snapshots.popitem(last=False)
                         expiry = time.time() + 300
                         key = (sid, args["tab_id"], binding["observation_id"])
                         self.pending_actions[key] = {"binding": binding, "expires_at": expiry}
+                        while len(self.pending_actions) > 8:
+                            self.pending_actions.pop(next(iter(self.pending_actions)))
                         result["host_approval"] = {"binding": binding, "expires_at": expiry,
                             "host_command": "browser-agent approve --binding-file binding.json --approval-file /path/to/approvals.json",
                             "resume_tool": "approved_act"}
@@ -200,6 +204,7 @@ class BrowserService:
             if command == "close":
                 await browser.close()
                 self.sessions.pop(sid, None)
+                self.locks.pop(sid, None)
                 for key in list(self.snapshots):
                     if key[0] == sid:
                         del self.snapshots[key]
@@ -223,6 +228,7 @@ class BrowserService:
                         self.sessions.pop(sid, None)
             self.snapshots.clear()
             self.pending_actions.clear()
+            self.locks.clear()
             if failures:
                 raise ExceptionGroup("Browser cleanup failures", failures)
 

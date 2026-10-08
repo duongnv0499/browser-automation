@@ -65,7 +65,7 @@ async def once(args):
             opened = await service.dispatch(setup, {"endpoint": args.endpoint, "headless": args.headless, "executable_path": args.executable_path})
             if args.command == "run":
                 tab = (await service.dispatch("new_tab", {"session_id": opened["session_id"], "url": args.url}))["tab"]
-                result = await service.dispatch("run", {"session_id": opened["session_id"], "tab_id": tab["id"], "goal": args.goal, "provider": args.provider, "model": args.model, "max_steps": args.max_steps})
+                result = await service.dispatch("run", {"session_id": opened["session_id"], "tab_id": tab["id"], "goal": args.goal, "provider": args.provider, "model": args.model, "max_steps": args.max_steps, "screenshot": args.screenshot})
             else:
                 print(json.dumps(opened), flush=True)
                 await json_lines(service)
@@ -117,6 +117,9 @@ def main():
             p.add_argument("--provider", choices=["openrouter", "openai"], default="openrouter")
             p.add_argument("--model")
             p.add_argument("--max-steps", type=int, default=50)
+            vision = p.add_mutually_exclusive_group()
+            vision.add_argument("--screenshot", dest="screenshot", action="store_true", default=None, help="Explicitly enable visual observations")
+            vision.add_argument("--no-screenshot", dest="screenshot", action="store_false", default=None, help="Text-only observations; default follows provider capability")
     args = parser.parse_args()
     if args.command == "approve":
         host_approve(args)
