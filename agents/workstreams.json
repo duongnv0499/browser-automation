@@ -28,17 +28,17 @@
     "Browser-only, deterministic-loop and live-model measurements are separate; no unmatched superiority claims",
     "Stable feature commits are pushed or concrete remote errors reported"
   ],
-  "harness_state": {"phase": "READY; GitOwner serializes feature pushes; awaiting Browser security completion and parent verification authorization", "installation": "uv sync installed locked dependencies successfully", "checks_run": [], "user_doc_preserved": true, "pushed_milestones": ["9e2fa16 bootstrap", "87a6952 providers", "921b8c2 agent", "8a4e12c practical docs", "ff8e6b3 architecture correction", "f4919b7 integrations", "95d8094 native-first CLI docs", "a627322 approval/cancellation", "8716a25 choice paging", "0356325 host executable env", "76f8c22 protocol/select refinement", "a086698 cancellation regression", "3839daf observed form policy", "60aed36 tool page-scheme security", "833ab92 transport security docs", "4d5fa97 tool schema/lifecycle", "6e959ba popup/text/visual progress", "66d194c active-tab approval"]},
+  "harness_state": {"phase": "All workers READY; scoped verification authorized; unified Harness suite/build remains gated until stable worker PASS and parent authorization", "installation": "uv sync installed locked dependencies successfully", "checks_run": [], "user_doc_preserved": true, "pushed_milestones": ["9e2fa16 bootstrap", "87a6952 providers", "921b8c2 agent", "8a4e12c practical docs", "ff8e6b3 architecture correction", "f4919b7 integrations", "95d8094 native-first CLI docs", "a627322 approval/cancellation", "8716a25 choice paging", "0356325 host executable env", "76f8c22 protocol/select refinement", "a086698 cancellation regression", "3839daf observed form policy", "60aed36 tool page-scheme security", "833ab92 transport security docs", "4d5fa97 tool schema/lifecycle", "6e959ba popup/text/visual progress", "66d194c active-tab approval", "5925957 review checkpoint", "75fe69b isolated-world browser"]},
   "parent_phase": {
     "completed_todos": 7,
     "total_todos": 10,
     "complete_categories": ["four research work items", "Harness", "Decision", "Integration"],
     "decision_status": "READY after joint-choice paging, observed multiselect, screenshot-progress hashing, popup routing and same-revision text windows",
     "integration_status": "READY after complete action schema, bounded lifecycle/locks, targeted tab_url checks, text-only screenshot flag and popup-bound approval",
-    "browser_status": "Not READY: final security implementation underway",
-    "runtime_review": "14 parent findings assigned to owning workers; current Decision/Integration repairs ready, Browser repairs pending",
-    "security_review": "Three Browser findings pending: page-main-world authority, local-file URL leakage, file TOCTOU. Isolated-world and pinned-file-descriptor repairs underway; rereview required.",
-    "verification": "None run. After Browser READY, parent authorizes scoped worker real smokes concurrently and focused SecurityReview rereview. Then Harness runs full suite/build/package-resource proof once stable.",
+    "browser_status": "READY at 75fe69b: isolated-world authority, native frame trees, pinned POSIX file transfers, safe press, tab_url, observation caps and fixtures implemented",
+    "runtime_review": "14 parent findings assigned to owning workers; repairs ready for scoped verification",
+    "security_review": "Focused rereview now authorized for page authority, local-file URL leakage and file TOCTOU repairs; no passing conclusion yet",
+    "verification": "Scoped Browser, Decision and Integration checks authorized NOW by Main, running concurrently; SecurityReview focused rereview. Harness unified full suite/build/package-resource/installed-wheel execution waits for stable scoped PASS and a further parent authorization.",
     "unavailable": ["live model API keys", "personal logged-in user Chrome", "headed desktop"],
     "claims": "No superiority benchmark proof. Real fixture, native personal-profile and paid-provider evidence must remain separate."
   },
