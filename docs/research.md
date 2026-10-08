@@ -42,3 +42,11 @@ Original evidence stays local and untracked under `/tmp/browser-decision-proof-c
 The Browser worker reports **16/16 scoped tests passed in 33.24s**, followed by `test_mcp_attached_browser_preserves_preexisting_tab` passing in **5.71s**. This attachment test uses a controlled browser fixture, not the unavailable personal logged-in Chrome profile.
 
 Harness opened `/tmp/browser-engine-proof/browser-proof.png` and `.json`: the real headless Chromium page visibly contains `Rendered DOM proof` in the Name field and `Canvas clicked`, with shadow/frame controls rendered. The saved browser-only metadata records screenshot observation **642.63 ms** and visual-target click **7.47 ms** for that single fixture run; these are not general benchmark medians. Its `live_provider` flag is false. Headless rendered screenshots are not proof of an interactive headed desktop, personal login session, or paid-model execution.
+
+### CLI, official MCP client, and installed OMP integration
+
+The Integration worker's final scoped command was `BROWSER_AGENT_LIBRARY_PATH=/home/claw/.local/lib/chromium/usr/lib/x86_64-linux-gnu BROWSER_INTEGRATION_TESTS=1 uv run --with mcp pytest tests/test_service.py tests/test_service_stdio.py tests/test_service_omp.py --basetemp=/tmp/browser-integration-final-proof`, reporting **27 passed in 16.37s**. The SDK is a temporary verification dependency, not a runtime requirement of the stdlib MCP server.
+
+Local evidence under `/tmp/browser-integration-final-proof/` includes real CLI before/after PNGs, official-MCP-client rendered-action/drag/selection/upload/policy PNGs, a controlled attached-session PNG, and `test_actual_omp_extension_load0/omp-proof.json`. Harness opened `mcp-after.png` showing `Rendered SUCCESS`, and OMP metadata showing the installed host registered `browser_agent` and completed the `browser-automation.doctor` probe with `agentInvoked: false`. This proves local tool registration/execution, not a paid OMP model task. The worker's scoped assertions cover the remaining client flows; unified verification is still a separate gate.
+
+Fixture secrets, approval records, probe scripts and raw screenshots remain local/untracked. No real personal-profile, live Luna, CAPTCHA/detection-bypass, or matched competitor benchmark claim follows from these tests.
