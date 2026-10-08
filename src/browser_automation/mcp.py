@@ -19,7 +19,7 @@ ACTION = schema({
     "observation_id": S,
     "operation": {"type": "string", "enum": ["click", "fill", "select", "scroll", "press", "hover", "drag", "wait", "back", "forward"]},
     "target": S, "to_target": S, "text": S,
-    "value": {"anyOf": [S, {"type": "array", "items": S, "minItems": 1}]},
+    "value": {"anyOf": [S, {"type": "array", "items": S}]},
     "key": S, "x": N, "y": N, "to_x": N, "to_y": N,
     "delta": N, "delta_x": N, "delta_y": N, "seconds": N,
 }, ("observation_id", "operation"))

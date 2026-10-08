@@ -29,7 +29,7 @@ export default function browserTools(pi) {
     child.on("error", fail);
     child.on("exit", code => { lines.close(); fail(new Error(`Browser worker exited (${code}); previous session IDs are invalid`)); });
   }
-  pi.registerTool({
+  const browserTool = {
     name: "browser_agent",
     label: "Browser Agent",
     description: "Persistent local browser sessions. First launch isolated or connect consented loopback Chrome, then retain session_id/tab_id/observation revision. Observe screenshot, act bound targets, paginate text, run Luna goal. File operations require exact HOST approval; no approval mint tool. No selectors/JS. Closing attached session preserves user Chrome.",
@@ -64,6 +64,14 @@ export default function browserTools(pi) {
       const content = [{ type: "text", text: JSON.stringify(data) }];
       if (screenshot) content.push({ type: "image", data: screenshot, mimeType: "image/png" });
       return { content, details: data };
+    },
+  };
+  pi.registerTool(browserTool);
+  pi.registerCommand("browser-agent-doctor", {
+    description: "Check the browser worker through the same registered tool, without a model call",
+    async handler() {
+      const result = await browserTool.execute("host-doctor", { command: "doctor" });
+      pi.sendMessage({ customType: "browser-automation.doctor", content: result.content, display: true, details: result.details });
     },
   });
   pi.on("session_shutdown", () => { worker?.stdin.end(); });

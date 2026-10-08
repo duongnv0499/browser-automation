@@ -108,5 +108,7 @@ Installed OMP v18.8.0 exposes public extension loading (`-e`) and `pi.registerTo
 BROWSER_AGENT_PYTHON=/ABS/PATH/browser-automation/.venv/bin/python \
   omp -e /ABS/PATH/browser-automation/integrations/omp/browser-tools.mjs
 ```
+Inside OMP, `/browser-agent-doctor` executes the same registered browser tool against the persistent Python worker and displays dependency/key-presence diagnostics without invoking a model. This is useful for checking interpreter configuration before opening a browser.
+
 
 The package must be installed in that interpreter (`uv sync` from this repository does so). Configure native consent/provider keys on the host. Extension results separate screenshot image content from JSON text. Session shutdown ends worker stdin for cleanup. This integrates this project's own tools; it does **not** reuse or emulate OMP's private browser runtime, and does not claim performance superiority over OMP/Codex/Jev. If extension loading is unavailable on another OMP release, use its shell tool to start the documented persistent worker and keep the process stdin/stdout alive; repeated one-shot shell commands do not preserve browser identities.

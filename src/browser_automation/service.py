@@ -88,10 +88,15 @@ class BrowserService:
                     if args.get("executable_path") and args["executable_path"] != executable:
                         raise ServiceError("host_policy_required", "Browser executable path must be configured by host BROWSER_EXECUTABLE_PATH")
                     browser = await BrowserSession.launch(headless=args.get("headless", False), executable_path=executable)
+                try:
+                    tabs = await browser.tabs()
+                except BaseException:
+                    await browser.close()
+                    raise
                 sid = uuid.uuid4().hex[:16]
                 self.sessions[sid] = browser
                 self.locks[sid] = asyncio.Lock()
-                return {"session_id": sid, "mode": "isolated" if command == "launch" else "attached", "tabs": await browser.tabs()}
+                return {"session_id": sid, "mode": "isolated" if command == "launch" else "attached", "tabs": tabs}
         sid = args.pop("session_id", None)
         if sid not in self.sessions:
             raise ServiceError("unknown_session", "Use launch or connect first and retain session_id")
@@ -104,7 +109,8 @@ class BrowserService:
             if command == "tabs":
                 return {"tabs": await browser.tabs()}
             if command == "new_tab":
-                return {"tab": await browser.new_tab(web_url(args.get("url", "about:blank")))}
+                url = web_url(args.get("url", "about:blank"))
+                return {"tab": await browser.new_tab(url)}
             if command == "observe":
                 limit = args.get("max_text", 12000)
                 if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100000:
