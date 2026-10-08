@@ -376,3 +376,65 @@ async def test_text_continuation_is_reachable_and_refreshed_for_verifier():
     result = await BrowserAgent(session, TextProvider(), max_text=10).run("t1", "Verify later visible text")
     assert result["status"] == "success" and not session.calls
     assert session.reads == [("r1", 10), ("r2", 10)]
+
+@pytest.mark.asyncio
+async def test_text_only_secondary_multiselect_changes_are_progress():
+    from browser_automation.providers import action_candidates
+
+    class ManySelectSession(Session):
+        selected = ["red"]
+
+        async def observe(self, tab_id, **kwargs):
+            page = obs(text="Colors")
+            page["elements"] = [{"id": "colors", "role": "combobox", "name": "Colors", "value": "red", "multiple": True,
+                                 "selected_values": list(self.selected), "operations": ["select"],
+                                 "options": [{"value": v, "selected": v in self.selected} for v in ("red", "blue", "green", "orange", "purple")]}]
+            return page
+
+        async def act(self, tab_id, action):
+            self.calls.append(action)
+            self.selected = action["value"]
+            return {}
+
+    class ManySelectProvider(Provider):
+        async def choose(self, observation, goal, history):
+            selected = observation["elements"][0]["selected_values"]
+            if len(selected) == 5:
+                return {"operation": "done"}
+            return next(a for a in action_candidates(observation).values() if a["operation"] == "select" and len(a["value"]) == len(selected) + 1)
+
+    session = ManySelectSession()
+    result = await BrowserAgent(session, ManySelectProvider(satisfied=True), screenshot=False, no_progress_limit=2).run("t1", "Select all five colors")
+    assert result["status"] == "success" and len(session.calls) == 4
+
+
+@pytest.mark.asyncio
+async def test_four_inspected_evidence_windows_are_all_freshly_verified():
+    class FourWindowSession(Session):
+        revision = 0
+        reads = []
+
+        async def observe(self, tab_id, **kwargs):
+            self.revision += 1
+            return {"id": f"r{self.revision}", "tab_id": tab_id, "text": "prefix", "elements": [],
+                    "next_offset": 10, "text_length": 50, "truncated": True}
+
+        async def text_continuation(self, tab_id, observation_id, offset, max_text):
+            assert observation_id == f"r{self.revision}"
+            self.reads.append((observation_id, offset))
+            return {"observation_id": observation_id, "text": f"proof{offset}", "offset": offset,
+                    "next_offset": offset + 10 if offset < 40 else None, "text_length": 50, "truncated": offset < 40}
+
+    class FourWindowProvider(Provider):
+        async def choose(self, observation, goal, history):
+            return {"operation": "done"} if observation.get("next_offset") is None else {"operation": "next_text"}
+
+        async def verify(self, observation, goal, history):
+            assert observation["verification_text_offsets"] == [10, 20, 30, 40]
+            assert [w["text"] for w in observation["text_windows"]] == ["proof10", "proof20", "proof30", "proof40"]
+            return {"satisfied": True, "probability": .99}
+
+    session = FourWindowSession()
+    result = await BrowserAgent(session, FourWindowProvider(), max_text=10).run("t1", "Verify four separate proofs")
+    assert result["status"] == "success"
+    assert session.reads == [(revision, offset) for revision in ("r1", "r2") for offset in (10, 20, 30, 40)]

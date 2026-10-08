@@ -47,7 +47,8 @@ class BrowserAgent:
                  "point_refinements": observation.get("point_refinements", {}),
                  "text_offset": observation.get("text_offset", 0),
                  "screenshot_hash": hashlib.sha256(observation.get("screenshot", "").encode()).hexdigest(),
-                 "elements": [{k: e.get(k) for k in ("role", "name", "value", "bounds", "operations")}
+                 "evidence_offsets": observation.get("verification_evidence", {}).get("retained_offsets", []),
+                 "elements": [{k: e.get(k) for k in ("role", "name", "value", "bounds", "operations", "selected_values", "options")}
                               for e in observation.get("elements", [])]}
         return hashlib.sha256(json.dumps(state, sort_keys=True).encode()).hexdigest()
 
@@ -102,7 +103,14 @@ class BrowserAgent:
         unchanged = 0
         stale_count = 0
         known_tabs = {tab_id: {"id": tab_id}}
-        text_offsets: deque = deque([0], maxlen=2)
+        text_offsets: dict[int, int] = {}
+        evidence_budget = max(0, getattr(self.provider, "max_context_chars", 48000) - self.max_text - len(goal) - 8000)
+
+        def evidence_metadata(page: dict) -> None:
+            page["verification_evidence"] = {"retained_offsets": list(text_offsets),
+                "retained_chars": sum(text_offsets.values()), "continuation_budget_chars": evidence_budget,
+                "over_budget": sum(text_offsets.values()) > evidence_budget,
+                "instructions": "All inspected continuation windows are retained until explicitly drop_evidence. Before DONE discard irrelevant windows if over budget; omitted evidence cannot prove a goal condition."}
 
         def account(result: dict) -> None:
             metrics["provider_calls"] += 1
@@ -119,7 +127,7 @@ class BrowserAgent:
             known_tabs[tab_id] = {"id": tab_id, "url": result.get("url"), "title": result.get("title")}
             result["available_tabs"] = [tab for id_, tab in known_tabs.items() if id_ != tab_id]
             text_offsets.clear()
-            text_offsets.append(0)
+            evidence_metadata(result)
             metrics["browser_ms"] += (time.perf_counter() - begin) * 1000
             return result
 
@@ -143,7 +151,7 @@ class BrowserAgent:
                 account(decision)
                 # Validate even custom providers: no model JS/selectors/extra arguments.
                 candidates = action_candidates(observation, getattr(self.provider, "max_choices", 256))
-                action = {k: decision[k] for k in ("operation", "target", "key", "delta", "value", "x", "y", "to_target", "region", "depth", "tab_id") if k in decision}
+                action = {k: decision[k] for k in ("operation", "target", "key", "delta", "value", "x", "y", "to_target", "region", "depth", "tab_id", "offset") if k in decision}
                 if action not in candidates.values():
                     status, error = "blocked", "Provider chose an unobserved or unsupported action"
                     break
@@ -153,9 +161,15 @@ class BrowserAgent:
                     chunk = await read_text(offset)
                     observation.update({k: v for k, v in chunk.items() if k not in {"observation_id", "offset"}})
                     observation["text_offset"] = offset
-                    if offset not in text_offsets:
-                        text_offsets.append(offset)
+                    if offset > 0:
+                        text_offsets[offset] = len(chunk["text"])
+                    evidence_metadata(observation)
                     history.append({"operation": operation, "offset": offset, "result": "read same-revision text without browser input"})
+                    continue
+                if operation == "drop_evidence":
+                    text_offsets.pop(action["offset"], None)
+                    evidence_metadata(observation)
+                    history.append({"operation": operation, "offset": action["offset"], "result": "explicitly excluded from verifier evidence"})
                     continue
                 if operation == "switch_tab":
                     tab_id = action["tab_id"]
@@ -177,12 +191,18 @@ class BrowserAgent:
                 if operation == "done":
                     # Fresh evidence and a separate request, not decision confidence.
                     offsets = list(text_offsets)
+                    if sum(text_offsets.values()) > evidence_budget:
+                        status, error = "blocked", "Verification evidence exceeds explicit budget; choose drop_evidence for irrelevant windows before DONE"
+                        break
                     observation = await observe()
                     windows = []
                     for offset in offsets:
                         if offset > 0:
                             chunk = await read_text(offset)
                             windows.append({"offset": offset, "text": chunk["text"], "next_offset": chunk.get("next_offset"), "source_truncated": chunk.get("source_truncated", False)})
+                    if sum(len(window["text"]) for window in windows) > evidence_budget:
+                        status, error = "blocked", "Fresh verification evidence exceeds explicit character budget"
+                        break
                     if windows:
                         observation["text_windows"] = windows
                     observation["verification_text_offsets"] = offsets

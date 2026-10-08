@@ -78,6 +78,8 @@ def action_window(observation: dict, limit: int = 256) -> tuple[dict[str, dict],
             yield {"operation": "next_text"}
         if observation.get("text_offset", 0) > 0:
             yield {"operation": "previous_text"}
+        for offset in observation.get("verification_evidence", {}).get("retained_offsets", []):
+            yield {"operation": "drop_evidence", "offset": offset}
         for tab in observation.get("available_tabs", []):
             yield {"operation": "switch_tab", "tab_id": tab["id"]}
         for element in elements:
@@ -336,7 +338,7 @@ class DecisionProvider:
             descriptions[key] = json.dumps({"action": action, "role": target.get("role"),
                                             "name": target.get("name"), "value": target.get("value"), "option_label": option_label}, ensure_ascii=False)
         answer, metrics = await self._decide(observation, goal, history, "next_action",
-            "Select one compatible operation/target/value. Fill alone gets text separately. Select uses offered observed values; multiple-select choices toggle one option while retaining others. next_actions/previous_actions page compatible actions; next_text/previous_text read same-revision text windows; switch_tab explicitly visits a host-observed action-created popup. These do not send browser input. refine_point narrows a screenshot target into a cell without input, up to six levels. Choose done only if complete; blocked if unsafe/impossible.", descriptions)
+            "Select one compatible operation/target/value. Fill alone gets text separately. Select uses offered observed values; multiple-select choices toggle one option while retaining others. next_actions/previous_actions page compatible actions; next_text/previous_text read same-revision text windows; drop_evidence explicitly excludes one irrelevant inspected window from fresh verification evidence to satisfy the reported character budget (never discard goal-relevant proof). switch_tab explicitly visits a host-observed action-created popup. These do not send browser input. refine_point narrows a screenshot target into a cell without input, up to six levels. Choose done only if complete and retained evidence fits budget; blocked if unsafe/impossible.", descriptions)
         return {**candidates[answer.pop("choice")], **answer, **metrics, "action_window": window}
 
     async def verify(self, observation: dict, goal: str, history: list) -> dict:
