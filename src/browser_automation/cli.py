@@ -1,0 +1,121 @@
+"""Persistent JSON-lines tools and practical isolated-browser commands."""
+from __future__ import annotations
+import argparse
+import asyncio
+import json
+import sys
+import os
+import time
+import uuid
+from pathlib import Path
+from .service import BrowserService, error_payload
+
+
+async def json_lines():
+    service = BrowserService()
+    try:
+        while line := await asyncio.to_thread(sys.stdin.readline):
+            request = {}
+            try:
+                request = json.loads(line)
+                result = await service.dispatch(request["command"], request.get("arguments", {}))
+                response = {"id": request.get("id"), "result": result}
+            except Exception as exc:
+                response = {"id": request.get("id") if isinstance(request, dict) else None, "error": error_payload(exc)}
+            print(json.dumps(response, ensure_ascii=False), flush=True)
+    finally:
+        await service.close()
+
+
+async def once(args):
+    service = BrowserService()
+    try:
+        if args.command == "doctor":
+            result = await service.dispatch("doctor")
+        else:
+            setup = "connect" if args.endpoint else ("launch" if args.command == "launch" or args.isolated else "connect_default")
+            opened = await service.dispatch(setup, {"endpoint": args.endpoint, "headless": args.headless, "executable_path": args.executable_path})
+            if args.command == "run":
+                tab = (await service.dispatch("new_tab", {"session_id": opened["session_id"], "url": args.url}))["tab"]
+                result = await service.dispatch("run", {"session_id": opened["session_id"], "tab_id": tab["id"], "goal": args.goal, "provider": args.provider, "model": args.model, "max_steps": args.max_steps})
+            else:
+                print(json.dumps(opened), flush=True)
+                # Retain the service and identities for subsequent JSON-lines commands.
+                while line := await asyncio.to_thread(sys.stdin.readline):
+                    req = {}
+                    try:
+                        req = json.loads(line)
+                        result = await service.dispatch(req["command"], req.get("arguments", {}))
+                        print(json.dumps({"id": req.get("id"), "result": result}), flush=True)
+                    except Exception as exc:
+                        print(json.dumps({"id": req.get("id") if isinstance(req, dict) else None, "error": error_payload(exc)}), flush=True)
+                return
+        print(json.dumps(result, ensure_ascii=False), flush=True)
+    finally:
+        await service.close()
+
+
+def host_approve(args):
+    if not sys.stdin.isatty():
+        raise ValueError("Approval requires an interactive host terminal, never agent stdio")
+    binding = json.loads(Path(args.binding_file).read_text())
+    if "binding" in binding:
+        binding = binding["binding"]
+    print(json.dumps(binding, indent=2))
+    if input("Approve exactly this action for five minutes? Type APPROVE: ") != "APPROVE":
+        raise ValueError("Approval declined")
+    path = Path(args.approval_file)
+    records = json.loads(path.read_text()) if path.exists() else []
+    record = {"token": uuid.uuid4().hex, "binding": binding, "expires_at": time.time() + 300}
+    records.append(record)
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w") as file:
+        json.dump(records, file)
+    os.chmod(path, 0o600)
+    print(json.dumps(record))
+
+def main():
+    parser = argparse.ArgumentParser(description="Local browser tools. serve/launch/connect retain sessions until stdin EOF; JSON-lines on stdin/stdout.")
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("serve", help="Persistent JSON-lines worker")
+    commands.add_parser("doctor", help="Report dependencies and key presence, never key values")
+    commands.add_parser("mcp", help="MCP stdio server")
+    approve = commands.add_parser("approve", help="HOST ONLY interactive exact-action approval; not an MCP tool")
+    approve.add_argument("--binding-file", required=True)
+    approve.add_argument("--approval-file", required=True)
+    for name in ("launch", "connect", "run"):
+        p = commands.add_parser(name)
+        p.add_argument("--endpoint", help="Explicit loopback CDP URL; attach never launches a substitute browser")
+        p.add_argument("--isolated", action="store_true", help="Explicit isolated browser instead of native discovery")
+        p.add_argument("--consent", action="store_true", help="Host consent to native current-profile discovery")
+        p.add_argument("--profile-dir", help="Chrome user-data directory for native discovery")
+        p.add_argument("--headless", action="store_true")
+        p.add_argument("--executable-path")
+        if name == "run":
+            p.add_argument("goal")
+            p.add_argument("--url", default="about:blank")
+            p.add_argument("--provider", choices=["openrouter", "openai"], default="openrouter")
+            p.add_argument("--model")
+            p.add_argument("--max-steps", type=int, default=50)
+    args = parser.parse_args()
+    if args.command == "approve":
+        host_approve(args)
+        return
+    if getattr(args, "consent", False):
+        os.environ["BROWSER_NATIVE_CONSENT"] = "1"
+    if getattr(args, "profile_dir", None):
+        os.environ["BROWSER_NATIVE_PROFILE_DIRECTORY"] = args.profile_dir
+    if args.command == "mcp":
+        from .mcp import main as mcp_main
+        mcp_main()
+        return
+    try:
+        asyncio.run(json_lines() if args.command == "serve" else once(args))
+    except KeyboardInterrupt:
+        pass
+    except Exception as exc:
+        print(json.dumps({"error": error_payload(exc)}), file=sys.stderr)
+        raise SystemExit(1)
+
+if __name__ == "__main__":
+    main()

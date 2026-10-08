@@ -1,0 +1,196 @@
+"""Local, transport-independent browser tool service. Never logs page contents."""
+from __future__ import annotations
+
+import asyncio
+import importlib.util
+import ipaddress
+import json
+from pathlib import Path
+import os
+import time
+import uuid
+from collections import OrderedDict
+from urllib.parse import urlsplit
+
+
+class ServiceError(Exception):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+def local_endpoint(endpoint: str) -> str:
+    """CDP is unauthenticated control: accept literal loopback hosts only."""
+    parsed = urlsplit(endpoint)
+    if parsed.scheme not in {"http", "https", "ws", "wss"} or parsed.username or parsed.password:
+        raise ServiceError("invalid_endpoint", "Use an explicit loopback HTTP or WebSocket CDP endpoint without credentials")
+    host = parsed.hostname
+    if host != "localhost":
+        try:
+            if not ipaddress.ip_address(host or "").is_loopback:
+                raise ValueError()
+        except ValueError:
+            raise ServiceError("invalid_endpoint", "Only loopback CDP endpoints are accepted") from None
+    return endpoint
+
+
+class BrowserService:
+    def __init__(self):
+        self.sessions: dict[str, object] = {}
+        self.locks: dict[str, asyncio.Lock] = {}
+        self.snapshots: OrderedDict[tuple[str, str], dict] = OrderedDict()
+        self._lifecycle = asyncio.Lock()
+        self._closed = False
+        self._used_approvals: set[str] = set()
+        self.approvals_file = os.environ.get("BROWSER_APPROVALS_FILE")
+        self.files_directory = os.environ.get("BROWSER_FILES_DIRECTORY")
+        self.pending_actions: dict[tuple[str, str, str], dict] = {}
+
+    def _approve(self, binding: dict, token: str | None = None) -> bool:
+        if not self.approvals_file:
+            return False
+        records = json.loads(Path(self.approvals_file).read_text())
+        for record in records:
+            identifier = record["token"]
+            if identifier in self._used_approvals or (token is not None and identifier != token):
+                continue
+            if record.get("expires_at", 0) > time.time() and record.get("binding") == binding:
+                self._used_approvals.add(identifier)
+                return True
+        return False
+
+    async def dispatch(self, command: str, arguments: dict | None = None) -> dict:
+        args = dict(arguments or {})
+        if command == "doctor":
+            return {"python_playwright": importlib.util.find_spec("playwright") is not None,
+                    "openrouter_key": bool(os.environ.get("OPENROUTER_API_KEY")),
+                    "openai_key": bool(os.environ.get("OPENAI_API_KEY")),
+                    "transport": "local stdio", "sessions": list(self.sessions),
+                    "native_consent": os.environ.get("BROWSER_NATIVE_CONSENT") == "1",
+                    "native_guidance": "Enable Chrome remote debugging consent; set BROWSER_NATIVE_CONSENT=1 for connect_default. Explicit loopback CDP connect never falls back to isolated launch."}
+        if command in {"launch", "connect", "connect_default"}:
+            from .browser import BrowserSession
+            async with self._lifecycle:
+                if self._closed:
+                    raise ServiceError("closed", "Service is closed")
+                if command == "connect":
+                    browser = await BrowserSession.connect(local_endpoint(args["endpoint"]))
+                elif command == "connect_default":
+                    browser = await BrowserSession.connect_default(profile_dir=os.environ.get("BROWSER_NATIVE_PROFILE_DIRECTORY"), consent=os.environ.get("BROWSER_NATIVE_CONSENT") == "1")
+                else:
+                    browser = await BrowserSession.launch(headless=args.get("headless", False), executable_path=args.get("executable_path"))
+                sid = uuid.uuid4().hex[:16]
+                self.sessions[sid] = browser
+                self.locks[sid] = asyncio.Lock()
+                return {"session_id": sid, "mode": "isolated" if command == "launch" else "attached", "tabs": await browser.tabs()}
+        sid = args.pop("session_id", None)
+        if sid not in self.sessions:
+            raise ServiceError("unknown_session", "Use launch or connect first and retain session_id")
+        async with self.locks[sid]:
+            browser = self.sessions.get(sid)
+            if browser is None:
+                raise ServiceError("unknown_session", "Session has closed")
+            if command == "tabs":
+                return {"tabs": await browser.tabs()}
+            if command == "new_tab":
+                return {"tab": await browser.new_tab(args.get("url", "about:blank"))}
+            if command == "observe":
+                limit = args.get("max_text", 12000)
+                if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100000:
+                    raise ServiceError("invalid_argument", "max_text must be 1..100000")
+                observation = await browser.observe(args["tab_id"], screenshot=args.get("screenshot", False), max_text=1_000_000)
+                full = dict(observation)
+                full.pop("screenshot", None)
+                key = (sid, observation["id"])
+                self.snapshots[key] = full
+                self.snapshots.move_to_end(key)
+                while len(self.snapshots) > 32:
+                    self.snapshots.popitem(last=False)
+                result = dict(observation)
+                result["text"] = observation.get("text", "")[:limit]
+                result["truncated"] = bool(observation.get("truncated")) or len(observation.get("text", "")) > limit
+                result["text_length"] = len(observation.get("text", ""))
+                return result
+            if command == "text":
+                snapshot = self.snapshots.get((sid, args["observation_id"]))
+                if snapshot is None:
+                    raise ServiceError("unknown_observation", "Snapshot expired; observe again")
+                offset, limit = args.get("offset", 0), args.get("limit", 12000)
+                if any(not isinstance(x, int) or isinstance(x, bool) for x in (offset, limit)) or offset < 0 or not 1 <= limit <= 100000:
+                    raise ServiceError("invalid_argument", "offset must be nonnegative and limit 1..100000")
+                text = snapshot.get("text", "")
+                end = min(offset + limit, len(text))
+                return {"observation_id": args["observation_id"], "text": text[offset:end], "offset": offset,
+                        "next_offset": end if end < len(text) else None, "total": len(text), "source_truncated": snapshot.get("truncated", False)}
+            if command == "act":
+                return await browser.act(args["tab_id"], args["action"])
+            if command == "approved_act":
+                key = (sid, args["tab_id"], args["observation_id"])
+                pending = self.pending_actions.get(key)
+                if pending is None or pending["expires_at"] <= time.time():
+                    raise ServiceError("approval_expired", "No matching pending action; run again")
+                if not self._approve(pending["binding"], args["approval_token"]):
+                    raise ServiceError("approval_required", "Exact host approval token required")
+                del self.pending_actions[key]
+                return await browser.act(args["tab_id"], pending["binding"]["action"])
+            if command == "close_tab":
+                await browser.close_tab(args["tab_id"])
+                return {"closed_tab": args["tab_id"]}
+            if command in {"upload", "download"}:
+                if not self.files_directory:
+                    raise ServiceError("file_policy_required", "Host must set BROWSER_FILES_DIRECTORY")
+                binding = {"session_id": sid, "operation": command, "tab_id": args["tab_id"]}
+                if command == "upload":
+                    binding.update({"observation_id": args["observation_id"], "target": args["target"], "paths": args["paths"]})
+                else:
+                    binding.update({"action": args["action"], "destination": args["destination"]})
+                if not self._approve(binding, args.get("approval_token")):
+                    return {"status": "approval_required", "binding": binding, "expires_at": time.time() + 300,
+                            "host_command": "browser-agent approve --binding-file binding.json --approval-file /path/to/approvals.json"}
+                if command == "upload":
+                    return await browser.upload(args["tab_id"], args["observation_id"], args["target"], args["paths"], allowed_directory=self.files_directory, approved=True)
+                return await browser.download(args["tab_id"], args["action"], args["destination"], allowed_directory=self.files_directory, approved=True)
+            if command == "run":
+                from .agent import BrowserAgent
+                from .providers import DecisionProvider
+                async def approve(request):
+                    return self._approve({"session_id": sid, **request})
+                provider = DecisionProvider.from_env(provider=args.get("provider", "openrouter"), model=args.get("model"))
+                try:
+                    agent = BrowserAgent(browser, provider, max_steps=args.get("max_steps", 50), approval=approve, screenshot=args.get("screenshot", True))
+                    result = await agent.run(args["tab_id"], args["goal"])
+                    if result.get("status") == "approval_required" and result.get("approval"):
+                        binding = {"session_id": sid, **result["approval"]}
+                        expiry = time.time() + 300
+                        key = (sid, args["tab_id"], binding["observation_id"])
+                        self.pending_actions[key] = {"binding": binding, "expires_at": expiry}
+                        result["host_approval"] = {"binding": binding, "expires_at": expiry,
+                            "host_command": "browser-agent approve --binding-file binding.json --approval-file /path/to/approvals.json",
+                            "resume_tool": "approved_act"}
+                    return result
+                finally:
+                    await provider.close()
+            if command == "close":
+                await browser.close()
+                self.sessions.pop(sid, None)
+                for key in list(self.snapshots):
+                    if key[0] == sid:
+                        del self.snapshots[key]
+                return {"closed": sid}
+            raise ServiceError("unknown_command", f"Unknown command: {command}")
+
+    async def close(self):
+        async with self._lifecycle:
+            self._closed = True
+            for sid, browser in list(self.sessions.items()):
+                async with self.locks[sid]:
+                    try:
+                        await browser.close()
+                    finally:
+                        self.sessions.pop(sid, None)
+            self.snapshots.clear()
+
+
+def error_payload(exc: Exception) -> dict:
+    # Errors are returned to the caller, never emitted to routine diagnostic logs.
+    return {"code": getattr(exc, "code", type(exc).__name__), "message": str(exc)}
