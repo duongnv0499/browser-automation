@@ -26,3 +26,13 @@ Performance reports must separate:
 3. Live paid-provider end-to-end loops, naming provider/model and including network, field text, retries, waits, and independent verification.
 
 Include initial-state boundaries, task, environment, repetitions, errors, outcome evidence and raw artifacts. Screenshots establish rendered browser state, not provider correctness or superiority. Do not claim a winner against Jev/Codex without matched data.
+
+## Verification evidence — 2026-10-08
+
+The Decision worker's authorized scoped verification initially reported 21 offline passes and one real-browser launch failure caused by missing host shared libraries. After explicit host library configuration, its real-browser deterministic HTTP-provider scenario passed (`1 passed in 3.31s`). This is **not** a live Luna request or a comparison benchmark.
+
+The rendered PNG and DOM outcome show the Query field filled with `hello` and visible `Submitted: hello`. The agent returned `success` only after a separate verification call. Recorded request metadata shows five actual loopback HTTP requests: three joint action choices, one structured field-text request, and one goal-verification request; each included one image part. The fixture supplied deterministic responses despite model identifiers in payloads.
+
+For this single local fixture run, recorded agent metrics were browser work **1,203.12 ms**, local-provider work **57.91 ms**, and total agent elapsed **1,281.72 ms**, with zero stale reobservations. These are instrumentation categories within one deterministic task, not standalone browser microbenchmarks, paid-model latency, headed-desktop proof, or general reliability evidence. The worker ran the scenario with explicit `BROWSER_AGENT_LIBRARY_PATH` deployment configuration; installation of host libraries is separate from package functionality.
+
+Original evidence stays local and untracked under `/tmp/browser-decision-proof-configured/test_real_browser_local_determ0/`: `deterministic-agent-outcome.png`, `deterministic-agent-outcome.json`, and `deterministic-agent-request-evidence.json`. Parent and Harness opened the rendered PNG and outcome metadata. Unified full-suite and installed-wheel verification remain pending; no native personal-profile or live-provider success is claimed.
