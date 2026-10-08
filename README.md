@@ -6,7 +6,7 @@ Guarded browser control and a multimodal Luna Decisions agent for Python, Codex,
 
 - Revision-bound element observations with compatible operations, stale/covered-target checks, and real Playwright input—not model-generated selectors or JavaScript.
 - DOM text plus optional PNG screenshots, including visual-target observations for interfaces that cannot be described completely by HTML controls.
-- OpenRouter alpha Decisions as the primary provider, with a distinct OpenAI Decisions adapter. Operation and target questions share one request; field text uses a separate structured-output call.
+- OpenRouter alpha Decisions as the primary provider, with a distinct OpenAI Decisions adapter. One typed choice selects a compatible operation/target pair; field text uses a separate structured-output call.
 - Persistent JSONL CLI and MCP stdio sessions; independent verification before a model-selected DONE counts as success.
 - Explicit native-profile consent, owned-tab lifecycle, and approval-bound consequential actions/file transfers.
 
