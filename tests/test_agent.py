@@ -170,7 +170,7 @@ async def test_real_browser_local_deterministic_provider_loop(tmp_path):
         (tmp_path / "deterministic-agent-request-evidence.json").write_text(json.dumps({
             "transport": "local deterministic HTTP Decisions fixture (not live Luna)",
             "requests": [{"kind": "field_text" if "messages" in body else next(iter(body["questions"])),
-                          "model": body["model"], "image_parts": sum(part.get("type") == "image_url" for part in body.get("state", []) if isinstance(part, dict)),
+                          "model": body["model"], "image_parts": sum(part.get("type") == "image_url" for part in (body["messages"][1]["content"] if "messages" in body else body.get("state", [])) if isinstance(part, dict)),
                           "input_chars": len(json.dumps(body)), "question_names": list(body.get("questions", {}))} for body in records]}))
     finally:
         await provider.close()
