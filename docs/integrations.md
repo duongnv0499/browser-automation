@@ -2,6 +2,8 @@
 
 All transports retain browser state in one worker. No TCP control server is exposed. CDP endpoints must be loopback HTTP/WebSocket URLs; remote endpoints and URL credentials are rejected. Browser page contents and API keys are not written to routine logs. Observations are sensitive: the caller receives page content and optional screenshots, and autonomous runs send these to the selected model provider.
 
+Browser tools navigate/read only HTTP(S) pages and `about:blank`. `file:`, `data:`, `javascript:`, and browser-internal pages are prohibited, including preexisting attached tabs: native attachment does not grant arbitrary local-file read access. Local file content enters the browser only through explicitly host-approved, directory-scoped uploads/downloads.
+
 ## Native first, isolated explicitly
 
 With current Chrome, enable remote debugging in `chrome://inspect/#remote-debugging`, then explicitly allow the browser connection when Chrome prompts. This package does not enable debugging, relaunch your profile, or bypass Chrome consent. Native discovery reads the running profile's `DevToolsActivePort`; if needed supply the **user-data directory** (not the `Default` subdirectory). Default paths are platform-dependent; see browser documentation.

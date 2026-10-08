@@ -33,6 +33,12 @@ def local_endpoint(endpoint: str) -> str:
             raise ServiceError("invalid_endpoint", "Only loopback CDP endpoints are accepted") from None
     return endpoint
 
+def web_url(url: str) -> str:
+    parsed = urlsplit(url)
+    if url == "about:blank" or (parsed.scheme in {"http", "https"} and parsed.hostname):
+        return url
+    raise ServiceError("prohibited_url", "Browser tools allow only HTTP(S) pages and about:blank; local files and browser-internal pages are not readable")
+
 
 class BrowserService:
     def __init__(self):
@@ -93,10 +99,15 @@ class BrowserService:
             browser = self.sessions.get(sid)
             if browser is None:
                 raise ServiceError("unknown_session", "Session has closed")
+            if command in {"observe", "act", "approved_act", "run", "upload", "download"}:
+                tab = next((tab for tab in await browser.tabs() if tab["id"] == args["tab_id"]), None)
+                if tab is None:
+                    raise ServiceError("unknown_tab", "Tab is not in this session")
+                web_url(tab["url"])
             if command == "tabs":
                 return {"tabs": await browser.tabs()}
             if command == "new_tab":
-                return {"tab": await browser.new_tab(args.get("url", "about:blank"))}
+                return {"tab": await browser.new_tab(web_url(args.get("url", "about:blank")))}
             if command == "observe":
                 limit = args.get("max_text", 12000)
                 if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100000:

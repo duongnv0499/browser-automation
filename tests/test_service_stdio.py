@@ -6,11 +6,25 @@ import base64
 import json
 import os
 import sys
-from urllib.parse import quote
+import pytest_asyncio
 import pytest
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.skipif(os.environ.get("BROWSER_INTEGRATION_TESTS") != "1", reason="Final integration verification opt-in")]
-PAGE = "data:text/html," + quote('<!doctype html><title>Transport proof</title><h1>Visible fixture</h1><a href="#result" onclick="document.querySelector(\'h1\').textContent=\'Rendered SUCCESS\'">Show result</a>')
+HTML = '<!doctype html><title>Transport proof</title><h1>Visible fixture</h1><a href="#result" onclick="document.querySelector(\'h1\').textContent=\'Rendered SUCCESS\'">Show result</a>'.encode()
+
+@pytest_asyncio.fixture
+async def local_page():
+    async def respond(reader, writer):
+        try:
+            await reader.readuntil(b"\r\n\r\n")
+            writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: " + str(len(HTML)).encode() + b"\r\nConnection: close\r\n\r\n" + HTML)
+            await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+    server = await asyncio.start_server(respond, "127.0.0.1", 0)
+    async with server:
+        yield f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}/"
 
 
 async def cli_call(process, command, arguments, identifier):
@@ -21,12 +35,18 @@ async def cli_call(process, command, arguments, identifier):
     return response["result"]
 
 
-async def test_cli_persistent_real_browser(tmp_path):
+async def test_cli_persistent_real_browser(tmp_path, local_page):
     process = await asyncio.create_subprocess_exec(sys.executable, "-m", "browser_automation", "serve", stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     try:
         opened = await cli_call(process, "launch", {"headless": True}, 1)
         sid = opened["session_id"]
-        tab = (await cli_call(process, "new_tab", {"session_id": sid, "url": PAGE}, 2))["tab"]
+        secret = tmp_path / "secret.txt"
+        secret.write_text("HOST_SECRET_NOT_BROWSER_CONTENT")
+        process.stdin.write((json.dumps({"id": "denial", "command": "new_tab", "arguments": {"session_id": sid, "url": secret.as_uri()}}) + "\n").encode())
+        await process.stdin.drain()
+        denied = json.loads(await asyncio.wait_for(process.stdout.readline(), 30))
+        assert denied["error"]["code"] == "prohibited_url" and "HOST_SECRET" not in json.dumps(denied)
+        tab = (await cli_call(process, "new_tab", {"session_id": sid, "url": local_page}, 2))["tab"]
         args = {"session_id": sid, "tab_id": tab["id"]}
         obs = await cli_call(process, "observe", {**args, "screenshot": True}, 3)
         png = base64.b64decode(obs["screenshot"])
@@ -47,7 +67,7 @@ async def test_cli_persistent_real_browser(tmp_path):
     assert process.returncode == 0, (await process.stderr.read()).decode()
 
 
-async def test_mcp_official_client_real_browser(tmp_path):
+async def test_mcp_official_client_real_browser(tmp_path, local_page):
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
     params = StdioServerParameters(command=sys.executable, args=["-m", "browser_automation.mcp"])
@@ -63,7 +83,11 @@ async def test_mcp_official_client_real_browser(tmp_path):
                 return result, json.loads(result.content[0].text)
             _, opened = await call("launch", {"headless": True})
             sid = opened["session_id"]
-            _, tab_result = await call("new_tab", {"session_id": sid, "url": PAGE})
+            secret = tmp_path / "secret.txt"
+            secret.write_text("HOST_SECRET_NOT_BROWSER_CONTENT")
+            denied = await client.call_tool("new_tab", {"session_id": sid, "url": secret.as_uri()})
+            assert denied.isError and "prohibited_url" in denied.content[0].text and "HOST_SECRET" not in denied.content[0].text
+            _, tab_result = await call("new_tab", {"session_id": sid, "url": local_page})
             args = {"session_id": sid, "tab_id": tab_result["tab"]["id"]}
             result, obs = await call("observe", {**args, "screenshot": True})
             images = [block for block in result.content if block.type == "image"]

@@ -22,6 +22,8 @@ class Session:
         return {"text": "abcdefghij"[offset:end], "next_offset": end if end < 10 else None}
     async def act(self, tab_id, action):
         return {"executed": action}
+    async def tabs(self):
+        return [{"id": "t", "url": "https://example.com", "title": "Test"}]
     async def close(self):
         self.closed = True
     async def close_tab(self, tab_id):
@@ -130,3 +132,22 @@ async def test_jsonlines_cancel_preserves_worker(monkeypatch, capsys):
     assert any(result.get("id") == 1 and result["error"]["code"] == "cancelled" for result in results)
     assert any(result.get("id") == 2 and result.get("result", {}).get("alive") for result in results)
     assert not worker.closed
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("url", ["file:///tmp/secret", "data:text/plain,secret", "chrome://settings", "javascript:alert(1)"])
+async def test_external_prohibited_url_denied_before_navigation(url):
+    service, session = service_with_session()
+    with pytest.raises(ServiceError, match="only HTTP") as error:
+        await service.dispatch("new_tab", {"session_id": "s", "url": url})
+    assert error.value.code == "prohibited_url"
+
+@pytest.mark.asyncio
+async def test_existing_attached_local_file_not_observed():
+    service, session = service_with_session()
+    async def tabs():
+        return [{"id": "t", "url": "file:///tmp/private-key", "title": "Private"}]
+    session.tabs = tabs
+    with pytest.raises(ServiceError) as error:
+        await service.dispatch("observe", {"session_id": "s", "tab_id": "t"})
+    assert error.value.code == "prohibited_url"
+    assert session.maximum == 0
