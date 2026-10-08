@@ -17,7 +17,7 @@ TAB = {**SESSION, "tab_id": S}
 ACTION = schema({"observation_id": S, "operation": {"type": "string", "enum": ["click", "fill", "select", "scroll", "press", "hover", "drag", "wait", "back", "forward"]}, "target": S, "text": S, "value": S, "key": S, "x": {"type": "number"}, "y": {"type": "number"}, "delta": {"type": "number"}}, ("observation_id", "operation"))
 TOOLS = [
     ("doctor", "Dependency/key presence only; no keys or page data.", schema()),
-    ("launch", "Launch isolated browser; not your logged-in profile.", schema({"headless": B, "executable_path": S})),
+    ("launch", "Launch isolated browser; not your logged-in profile. Executable is host-configured only.", schema({"headless": B})),
     ("connect", "Attach to consented logged-in Chrome at explicit loopback CDP URL.", schema({"endpoint": S}, ("endpoint",))),
     ("connect_default", "Discover consent-enabled local Chrome; never isolated fallback.", schema()),
     ("tabs", "List persistent session tabs.", schema(SESSION, ("session_id",))),

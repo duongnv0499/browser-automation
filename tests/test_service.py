@@ -102,3 +102,31 @@ async def test_direct_risky_action_requires_exact_host_approval(tmp_path, monkey
 async def test_unknown_session_error():
     with pytest.raises(ServiceError, match="retain session_id"):
         await BrowserService().dispatch("tabs", {"session_id": "gone"})
+
+@pytest.mark.asyncio
+async def test_jsonlines_cancel_preserves_worker(monkeypatch, capsys):
+    from browser_automation.cli import json_lines
+    import io
+    import sys
+    cancelled = asyncio.Event()
+    class Worker:
+        closed = False
+        async def dispatch(self, command, args):
+            if command == "slow":
+                try:
+                    await asyncio.sleep(60)
+                except asyncio.CancelledError:
+                    cancelled.set()
+                    raise
+            return {"alive": True}
+        async def close(self):
+            self.closed = True
+    worker = Worker()
+    requests = '\n'.join([json.dumps({"id": 1, "command": "slow"}), json.dumps({"command": "cancel", "arguments": {"request_id": 1}}), json.dumps({"id": 2, "command": "doctor"})]) + '\n'
+    monkeypatch.setattr(sys, "stdin", io.StringIO(requests))
+    await json_lines(worker)
+    results = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert cancelled.is_set()
+    assert any(result.get("id") == 1 and result["error"]["code"] == "cancelled" for result in results)
+    assert any(result.get("id") == 2 and result.get("result", {}).get("alive") for result in results)
+    assert not worker.closed
