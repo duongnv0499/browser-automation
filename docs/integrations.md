@@ -112,3 +112,16 @@ Inside OMP, `/browser-agent-doctor` executes the same registered browser tool ag
 
 
 The package must be installed in that interpreter (`uv sync` from this repository does so). Configure native consent/provider keys on the host. Extension results separate screenshot image content from JSON text. Session shutdown ends worker stdin for cleanup. This integrates this project's own tools; it does **not** reuse or emulate OMP's private browser runtime, and does not claim performance superiority over OMP/Codex/Jev. If extension loading is unavailable on another OMP release, use its shell tool to start the documented persistent worker and keep the process stdin/stdout alive; repeated one-shot shell commands do not preserve browser identities.
+
+## Reproducing integration verification
+
+```sh
+BROWSER_INTEGRATION_TESTS=1 uv run --with mcp pytest \
+  tests/test_service.py tests/test_service_stdio.py tests/test_service_omp.py \
+  --basetemp=/tmp/browser-integration-proof
+```
+
+These opt-in tests were exercised with real Chromium, the official MCP Python SDK 2.3.0, and installed OMP 18.8.0. They assert rendered DOM outcomes and save before/after PNGs, not merely echoed tool parameters. Scenarios include snapshot-bound clicks, host-approved drag, empty multi-select clearing, refused consequential click/Enter, non-clicking Escape focus, scoped upload/download contents, file-URL denial, real request cancellation, and preservation of a preexisting tab/cookie after CDP disconnect. OMP's registered tool is executed through `/browser-agent-doctor`; the RPC completion explicitly reports no model turn.
+
+Text-only CLI goal tests use a deterministic **local HTTP Decisions fixture** with independent completion verification. They exercise the real provider wire/client and browser loop but are not live-model quality, cost, or latency evidence. The CDP test uses a disposable real browser with fixture session state: it does not establish that a third-party logged-in account or Chrome's real user-consent dialog was exercised. No live provider verification is claimed without supplied API credentials. If Chromium needs non-system shared libraries, configure the host's `BROWSER_AGENT_LIBRARY_PATH` explicitly.
+
