@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "browser-automation"
+version = "0.1.0"
+description = "Guarded browser control and structured decision agents for CLI and MCP clients"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "httpx>=0.27,<1",
+  "playwright>=1.49,<2",
+]
+
+[project.scripts]
+browser-agent = "browser_automation.cli:main"
+browser-agent-mcp = "browser_automation.mcp:main"
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "pytest-asyncio>=0.24,<2"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/browser_automation"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/", "tests/", "docs/", "README.md", "CHANGELOG.md", "pyproject.toml", "uv.lock"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

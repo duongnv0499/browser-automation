@@ -1,0 +1,33 @@
+{
+  "goal": "Production-usable Python browser automation with explicit native Chrome consent or isolated launch, OpenRouter-primary/OpenAI Decisions, guarded observation/control, CLI/MCP and available OMP integration.",
+  "parent_role": "Research initially; then PM, architecture and review only. Workers implement and repair owned paths.",
+  "git_owner": "Harness serializes staging exact owned paths, feature commits and pushes on shared main; no force/reset or git add .",
+  "verification_gate": "All workers READY first; parent authorizes unified checks. No mid-flight tests/builds/lint/smokes.",
+  "ownership": {
+    "Harness": ["AGENTS.md", "agents/worker-instructions.md", "agents/workstreams.json", "README.md", "pyproject.toml", "uv.lock", ".gitignore", ".env.example", "src/browser_automation/__init__.py", "docs/architecture.md", "docs/research.md", "CHANGELOG.md"],
+    "Browser": ["src/browser_automation/browser.py", "src/browser_automation/snapshot.js", "tests/test_browser*.py", "docs/browser.md", "agents/browser.json"],
+    "Decision": ["src/browser_automation/providers.py", "src/browser_automation/agent.py", "provider/agent tests", "docs/providers.md", "agents/decision.json"],
+    "Integration": ["src/browser_automation/service.py", "src/browser_automation/cli.py", "src/browser_automation/mcp.py", "integrations/", "integration tests", "docs/integrations.md", "agents/integration.json"]
+  },
+  "contracts": {
+    "runtime": "Python >=3.11, async methods, src/browser_automation package",
+    "browser": "BrowserSession.connect(endpoint); connect_default(profile_dir=None,consent=False); launch(headless=False,executable_path=None); tabs; new_tab; observe; act; close. Attach never kills user browser or preexisting tabs.",
+    "observation": "Opaque revision id, tab_id,url,title,text,elements,truncated,timestamp; optional screenshot base64 PNG. Elements: id,role,name,value,operations,bounds,frame info.",
+    "action": "observation_id,operation,target optional,text/value/key/x/y/delta optional. Validate revision, tab, compatibility, coverage before execution; no model selectors or JS.",
+    "provider": "DecisionProvider.from_env(provider='openrouter',model=None); choose(observation,goal,history); field_text(observation,goal,target,history); verify(observation,goal,history); close. Typed errors, refusal stops, transport-specific schemas.",
+    "agent": "BrowserAgent(session,provider,max_steps=50,...).run(tab_id,goal); status,steps,observation,verification,metrics. DONE requires independent verify; bounded retries/history and consequential-action approval callback.",
+    "entrypoints": "browser-agent=browser_automation.cli:main; browser-agent-mcp=browser_automation.mcp:main",
+    "extensions": "Browser text_continuation(tab_id,observation_id,offset,max_text), owned-only close_tab; upload/download interfaces coordinated by Browser and Integration. OMP integration uses installed public API when available."
+  },
+  "acceptance": [
+    "Native current-profile attach uses explicit consent and browser opt-in; never falls back automatically to isolated launch",
+    "Real browser input produces visible rendered outcomes, screenshot evidence and rendered DOM assertions",
+    "Preexisting browser tabs survive disconnect",
+    "Model-selected DONE is independently verified; refusal or missing risky-action approval stops",
+    "Secrets/profile data/private traces stay untracked",
+    "Browser-only, deterministic-loop and live-model measurements are separate; no unmatched superiority claims",
+    "Stable feature commits are pushed or concrete remote errors reported"
+  ],
+  "harness_state": {"phase": "bootstrap", "checks_run": [], "user_doc_preserved": true},
+  "resume": "Re-read AGENTS.md, this file, own state, and current owned source; retain scope/research/security/verification/commit rules."
+}
