@@ -18,6 +18,8 @@ Actions include observation revision, operation, compatible target and operation
 
 Uploads/downloads require explicit approval and a host-controlled allowed directory. Approval must bind the exact operation, revision, target and filenames/destination; a model cannot approve its own policy or arbitrary directory. Provider inference sends selected page text/screenshots off-host; users must review sensitive content before enabling it. Remote debugging grants powerful profile access and must not be publicly exposed.
 
+External CLI/MCP/OMP tool transports accept HTTP(S) pages and `about:blank`, not arbitrary local-file, data, JavaScript, or browser-internal URLs. Service checks navigation arguments and existing tab URLs before observation/input/inference, so a preexisting file tab does not authorize reading local secrets. This transport boundary is distinct from the trusted Python browser API and does not replace review of HTTP sites or provider data sharing.
+
 ## Completion and evidence
 
 The agent separately verifies its outcome against a fresh observation. Tests cover offline transport/guard behavior, while real browser verification must assert rendered DOM outcomes and save screenshots. Native attachment and live model requests remain distinct acceptance evidence; lack of credentials or user Chrome must be disclosed rather than masked by an isolated/mock success. See `research.md` and `../AGENTS.md`.
