@@ -191,7 +191,7 @@ class BrowserService:
                         while len(self.snapshots) > 8:
                             self.snapshots.popitem(last=False)
                         expiry = time.time() + 300
-                        key = (sid, args["tab_id"], binding["observation_id"])
+                        key = (sid, binding["tab_id"], binding["observation_id"])
                         self.pending_actions[key] = {"binding": binding, "expires_at": expiry}
                         while len(self.pending_actions) > 8:
                             self.pending_actions.pop(next(iter(self.pending_actions)))
