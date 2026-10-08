@@ -26,15 +26,22 @@
   };
   const label = el => {
     const labelled = (el.getAttribute('aria-labelledby') || '').split(/\s+/).map(id => (el.getRootNode().getElementById?.(id)||document.getElementById(id))?.textContent || '').join(' ').trim();
-    return (el.getAttribute('aria-label') || labelled || Array.from(el.labels || []).map(x => x.textContent).join(' ') || el.getAttribute('alt') || el.getAttribute('title') || el.getAttribute('placeholder') || el.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+    return (el.getAttribute('aria-label') || labelled || Array.from(el.labels || []).map(x => x.textContent).join(' ') || el.getAttribute('alt') || el.getAttribute('title') || el.getAttribute('placeholder') || el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+  };
+  const fastHash = s => {
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+    return (h >>> 0).toString(16);
   };
   const fieldValue = el => {
-    const value=String(el.value||'');
-    if(!sensitive(el)) return value;
-    const old=state.secretValues.get(el);
-    const current=old&&old.value===value?old:{value,version:(old?.version||0)+1};
-    state.secretValues.set(el,current);
-    return '[REDACTED:'+current.version+']';
+    const raw = String(el.value || '');
+    if (sensitive(el)) {
+      const old = state.secretValues.get(el);
+      const current = old && old.value === raw ? old : {value: raw, version: (old?.version || 0) + 1};
+      state.secretValues.set(el, current);
+      return '[REDACTED:' + current.version + ']';
+    }
+    return raw.length > 200 ? `${raw.slice(0, 100)}...len:${raw.length}:h:${fastHash(raw)}` : raw;
   };
   state.fingerprint = el => JSON.stringify([el.tagName,el.type||el.getAttribute('type'),el.getAttribute('role'),label(el),fieldValue(el),el.href||'',el.form?.action||'',el.form?.method||'',el.getAttribute('formaction'),el.getAttribute('formmethod'),el.disabled,el.readOnly,el.multiple]);
   const elements = [], text = [], live = new Map(), fields = [];
@@ -63,7 +70,15 @@
           const r = el.getBoundingClientRect();
           if (elements.length < maxElements) {
             const isSub = !!el.form && (['submit','image'].includes(type) || (tag === 'button' && (el.type === 'submit' || !el.getAttribute('type'))));
-            elements.push({id,signature:state.fingerprint(el),role,name:label(el),value:sensitive(el)?'[REDACTED]':String(el.value || '').slice(0,1000),operations:[...new Set(ops)],bounds:{x:r.x,y:r.y,width:r.width,height:r.height},sensitive:sensitive(el),input_type:tag==='button'?(el.type||'submit'):(el.type||type),is_submit:isSub,tag,href:el.href||null,form_action:el.hasAttribute('formaction')?el.formAction:el.form?.action||null,form_method:el.hasAttribute('formmethod')?el.formMethod:el.form?.method||null,multiple:tag==='select'?!!el.multiple:(tag==='input'&&type==='file')?!!el.multiple:false,options:tag==='select'?Array.from(el.options).map(o=>({value:o.value,label:o.label,selected:!!o.selected,disabled:o.disabled||(o.parentElement.tagName==='OPTGROUP'&&o.parentElement.disabled)})):[],selected_values:tag==='select'?Array.from(el.selectedOptions||[]).map(o=>o.value):undefined});
+            const maxOpts = 50;
+            const rawOpts = tag === 'select' ? Array.from(el.options) : [];
+            const opts = rawOpts.slice(0, maxOpts).map(o => ({
+              value: String(o.value || '').slice(0, 300),
+              label: String(o.label || o.text || '').slice(0, 300),
+              selected: !!o.selected,
+              disabled: o.disabled || (o.parentElement.tagName === 'OPTGROUP' && o.parentElement.disabled)
+            }));
+            elements.push({id,signature:state.fingerprint(el),role,name:label(el),value:sensitive(el)?'[REDACTED]':String(el.value || '').slice(0,1000),operations:[...new Set(ops)],bounds:{x:r.x,y:r.y,width:r.width,height:r.height},sensitive:sensitive(el),input_type:tag==='button'?(el.type||'submit'):(el.type||type),is_submit:isSub,tag,href:el.href||null,form_action:el.hasAttribute('formaction')?el.formAction:el.form?.action||null,form_method:el.hasAttribute('formmethod')?el.formMethod:el.form?.method||null,multiple:tag==='select'?!!el.multiple:(tag==='input'&&type==='file')?!!el.multiple:false,options:opts,omitted_options:Math.max(0, rawOpts.length - maxOpts),selected_values:tag==='select'?Array.from(el.selectedOptions||[]).map(o=>o.value):undefined});
           } else {
             omittedElements++;
             sourceTruncated = true;

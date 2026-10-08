@@ -34,7 +34,7 @@ async def site():
 <div id="drop" role="button" aria-label="Drop target" tabindex="0" ondragover="event.preventDefault()" ondrop="event.preventDefault();this.textContent='Dropped'">Drop target</div>
 <canvas id="canvas" width="160" height="80" aria-label="Canvas" onclick="document.querySelector('#out').textContent='Canvas clicked'"></canvas>
 <p>VISIBLE LONG TEXT CONTENT FOR CONTINUATION. This paragraph contains sufficient visible text to demonstrate explicit continuation without silent truncation.</p>
-<script>const root=document.querySelector('#shadow').attachShadow({mode:'open'});root.innerHTML='<button onclick="this.textContent=\'Shadow clicked\'">Shadow button</button>';const ctx=document.querySelector('canvas').getContext('2d');ctx.fillStyle='#087f5b';ctx.fillRect(0,0,160,80);ctx.fillStyle='white';ctx.font='18px sans-serif';ctx.fillText('Canvas target',12,45);</script>
+<script>const root=document.querySelector('#shadow').attachShadow({mode:'open'});const btn=document.createElement('button');btn.textContent='Shadow button';btn.onclick=()=>btn.textContent='Shadow clicked';root.appendChild(btn);const ctx=document.querySelector('canvas').getContext('2d');ctx.fillStyle='#087f5b';ctx.fillRect(0,0,160,80);ctx.fillStyle='white';ctx.font='18px sans-serif';ctx.fillText('Canvas target',12,45);</script>
 </body></html>'''
 
     async def handle(reader, writer):
@@ -228,7 +228,11 @@ async def test_upload_download_scopes_and_approval(browser,tmp_path):
 async def external_chrome(tmp_path):
     async with async_playwright() as pw:
         executable = pw.chromium.executable_path
-    process = await asyncio.create_subprocess_exec(executable,'--headless=new','--no-sandbox','--remote-debugging-port=0',f'--user-data-dir={tmp_path}', 'about:blank',stdout=asyncio.subprocess.DEVNULL,stderr=asyncio.subprocess.DEVNULL)
+    env = dict(os.environ)
+    lib = os.environ.get('BROWSER_AGENT_LIBRARY_PATH') or str(Path.home() / '.local/lib/chromium/usr/lib/x86_64-linux-gnu')
+    if Path(lib).is_dir() and lib not in env.get('LD_LIBRARY_PATH', '').split(':'):
+        env['LD_LIBRARY_PATH'] = f"{lib}:{env.get('LD_LIBRARY_PATH', '')}".rstrip(':') if env.get('LD_LIBRARY_PATH') else lib
+    process = await asyncio.create_subprocess_exec(executable,'--headless=new','--no-sandbox','--remote-debugging-port=0',f'--user-data-dir={tmp_path}', 'about:blank',stdout=asyncio.subprocess.DEVNULL,stderr=asyncio.subprocess.DEVNULL,env=env)
     try:
         for _ in range(100):
             active = tmp_path/'DevToolsActivePort'

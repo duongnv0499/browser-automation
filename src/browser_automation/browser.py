@@ -21,6 +21,7 @@ from playwright.async_api import async_playwright, Error as PlaywrightError
 from .browser_files import ScopedFiles, FilePolicyError, MAX_FILE_BYTES, MAX_UPLOAD_BYTES, MAX_UPLOAD_FILES
 
 
+
 class BrowserError(RuntimeError):
     """An explicit browser operation failure."""
     code = "browser_error"
@@ -186,7 +187,8 @@ class BrowserSession:
     @staticmethod
     def _runtime_value(result: dict[str, Any]) -> Any:
         if result.get('exceptionDetails'):
-            raise BrowserError('Trusted isolated browser script failed: ' + result['exceptionDetails'].get('text','unknown error'))
+            desc = result['exceptionDetails'].get('exception', {}).get('description') or result['exceptionDetails'].get('text', 'unknown error')
+            raise BrowserError('Trusted isolated browser script failed: ' + desc)
         value = result.get('result',{}).get('value')
         if isinstance(value,dict) and value.get('__protected_url'):
             raise ProtectedUrlError('Protected document cannot be evaluated or disclosed')
@@ -194,7 +196,7 @@ class BrowserSession:
 
     async def _eval(self, frame: _FrameRef, script: str, argument: Any = None) -> Any:
         context = await self._world(frame)
-        result = await frame.session.send('Runtime.callFunctionOn', {'executionContextId':context,'functionDeclaration':f'function(arg){{const url=location.href;if(!(url==="about:blank"||url==="about:srcdoc"||["http:","https:"].includes(new URL(url).protocol)))return {{__protected_url:true}};const fn=({script});return typeof fn==="function"?fn(arg):fn;}}','arguments':[{'value':argument}],'returnByValue':True})
+        result = await frame.session.send('Runtime.callFunctionOn', {'executionContextId':context,'functionDeclaration':f'function(arg){{let proto="";try{{proto=new URL(location.href).protocol;}}catch(e){{}}const url=location.href||"";if(!(url==="about:blank"||url==="about:srcdoc"||proto==="http:"||proto==="https:"))return {{__protected_url:true}};const fn=({script});return typeof fn==="function"?fn(arg):fn;}}','arguments':[{'value':argument}],'returnByValue':True})
         return self._runtime_value(result)
 
     async def _eval_owner(self, frame: _FrameRef, script: str, argument: Any = None) -> Any:
@@ -275,7 +277,17 @@ class BrowserSession:
     async def launch(cls, headless: bool = False, executable_path: str | None = None) -> BrowserSession:
         pw = await async_playwright().start()
         try:
-            browser = await pw.chromium.launch(headless=headless, executable_path=executable_path)
+            env = dict(os.environ)
+            extra_lib = os.environ.get('BROWSER_AGENT_LIBRARY_PATH')
+            if not extra_lib:
+                detected = Path.home() / '.local/lib/chromium/usr/lib/x86_64-linux-gnu'
+                if detected.is_dir():
+                    extra_lib = str(detected)
+            if extra_lib:
+                current = env.get('LD_LIBRARY_PATH', '')
+                if extra_lib not in current.split(':'):
+                    env['LD_LIBRARY_PATH'] = f"{extra_lib}:{current}".rstrip(':') if current else extra_lib
+            browser = await pw.chromium.launch(headless=headless, executable_path=executable_path, env=env)
             session = cls(pw, browser, attached=False)
             session._default_context = await browser.new_context(accept_downloads=True)
             return session
@@ -581,8 +593,8 @@ class BrowserSession:
         seconds = action.get('seconds',0.25)
         if operation=='fill' and not isinstance(text,str):
             raise UnsafeActionError('fill requires text')
-        if operation=='select' and (not isinstance(value,(str,list)) or isinstance(value,list) and (not value or not all(isinstance(v,str) for v in value))):
-            raise UnsafeActionError('select requires option value or nonempty list of values')
+        if operation=='select' and (not isinstance(value,(str,list)) or isinstance(value,list) and not all(isinstance(v,str) for v in value)):
+            raise UnsafeActionError('select requires option value or list of values')
         if operation=='select':
             selected = value if isinstance(value,list) else [value]
             if any(v not in target.choices for v in selected) or len(selected)>1 and not target.multiple:
@@ -610,10 +622,9 @@ class BrowserSession:
         elif operation == 'hover':
             await page.mouse.move(*point)
         elif operation == 'fill':
-            await page.mouse.click(*point)
-            focused = await self._eval(target.frame,'''({token,node})=>{const s=globalThis.__browserAutomationSnapshot_v1;const e=s&&s.token===token?s.nodes.get(node):null;let a=document.activeElement;while(a?.shadowRoot?.activeElement)a=a.shadowRoot.activeElement;return !!e&&(a===e||e.contains(a));}''', {'token':target.document,'node':target.node})
+            focused = await self._eval(target.frame,'''({token,node})=>{const s=globalThis.__browserAutomationSnapshot_v1;const e=s&&s.token===token?s.nodes.get(node):null;if(!e||!e.isConnected||e.disabled||e.closest('[inert]'))return false;if(typeof e.focus==='function')e.focus();let a=document.activeElement;while(a?.shadowRoot?.activeElement)a=a.shadowRoot.activeElement;return !!e&&(a===e||e.contains(a));}''', {'token':target.document,'node':target.node})
             if not focused:
-                raise UnsafeActionError('Target did not receive focus; click may have occurred but no text was entered')
+                raise UnsafeActionError('Target could not be focused for text entry')
             await page.keyboard.press('Meta+A' if platform.system() == 'Darwin' else 'Control+A')
             if text:
                 await page.keyboard.insert_text(text)
