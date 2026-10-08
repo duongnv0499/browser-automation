@@ -36,3 +36,9 @@ The rendered PNG and DOM outcome show the Query field filled with `hello` and vi
 For this single local fixture run, recorded agent metrics were browser work **1,203.12 ms**, local-provider work **57.91 ms**, and total agent elapsed **1,281.72 ms**, with zero stale reobservations. These are instrumentation categories within one deterministic task, not standalone browser microbenchmarks, paid-model latency, headed-desktop proof, or general reliability evidence. The worker ran the scenario with explicit `BROWSER_AGENT_LIBRARY_PATH` deployment configuration; installation of host libraries is separate from package functionality.
 
 Original evidence stays local and untracked under `/tmp/browser-decision-proof-configured/test_real_browser_local_determ0/`: `deterministic-agent-outcome.png`, `deterministic-agent-outcome.json`, and `deterministic-agent-request-evidence.json`. Parent and Harness opened the rendered PNG and outcome metadata. Unified full-suite and installed-wheel verification remain pending; no native personal-profile or live-provider success is claimed.
+
+### Browser-only fixture and attached-session checks
+
+The Browser worker reports **16/16 scoped tests passed in 33.24s**, followed by `test_mcp_attached_browser_preserves_preexisting_tab` passing in **5.71s**. This attachment test uses a controlled browser fixture, not the unavailable personal logged-in Chrome profile.
+
+Harness opened `/tmp/browser-engine-proof/browser-proof.png` and `.json`: the real headless Chromium page visibly contains `Rendered DOM proof` in the Name field and `Canvas clicked`, with shadow/frame controls rendered. The saved browser-only metadata records screenshot observation **642.63 ms** and visual-target click **7.47 ms** for that single fixture run; these are not general benchmark medians. Its `live_provider` flag is false. Headless rendered screenshots are not proof of an interactive headed desktop, personal login session, or paid-model execution.
