@@ -152,9 +152,10 @@ async def test_real_browser_local_deterministic_provider_loop(tmp_path):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     url = f"http://127.0.0.1:{server.server_port}"
-    session = await BrowserSession.launch(headless=True)
+    session = None
     provider = DecisionProvider(api_key="local-fixture-only", endpoint=url + "/decisions", text_endpoint=url + "/text")
     try:
+        session = await BrowserSession.launch(headless=True)
         tab = await session.new_tab(url)
         tab_id = tab["id"] if isinstance(tab, dict) else tab
         result = await BrowserAgent(session, provider, approval=lambda _: True, screenshot=True).run(tab_id, "Enter hello and submit; verify Submitted: hello appears")
@@ -166,9 +167,15 @@ async def test_real_browser_local_deterministic_provider_loop(tmp_path):
         assert screenshot.startswith(b"\x89PNG\r\n\x1a\n")
         (tmp_path / "deterministic-agent-outcome.png").write_bytes(screenshot)
         (tmp_path / "deterministic-agent-outcome.json").write_text(json.dumps({"status": result["status"], "text": result["observation"]["text"], "metrics": result["metrics"]}))
+        (tmp_path / "deterministic-agent-request-evidence.json").write_text(json.dumps({
+            "transport": "local deterministic HTTP Decisions fixture (not live Luna)",
+            "requests": [{"kind": "field_text" if "messages" in body else next(iter(body["questions"])),
+                          "model": body["model"], "image_parts": sum(part.get("type") == "image_url" for part in body.get("state", []) if isinstance(part, dict)),
+                          "input_chars": len(json.dumps(body)), "question_names": list(body.get("questions", {}))} for body in records]}))
     finally:
         await provider.close()
-        await session.close()
+        if session is not None:
+            await session.close()
         server.shutdown()
         server.server_close()
         thread.join()
