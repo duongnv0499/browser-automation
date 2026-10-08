@@ -1,6 +1,6 @@
 # Architecture
 
-Python 3.11+ asynchronous code lives in `src/browser_automation`. Importing the package does not start a browser or construct a provider. `uv.lock` records the installation resolution; Hatch includes package files such as `snapshot.js` in the wheel.
+Python 3.11+ asynchronous code lives in `src/browser_automation`. Importing the package does not start a browser or construct a provider. `uv.lock` records the installation resolution. On 2026-10-08, `uv build` successfully produced the 0.1.0 source distribution and wheel; archive inspection confirmed `browser_automation/snapshot.js` is packaged. The installed wheel's CLI doctor also ran in a clean environment outside the checkout, without provider keys, native consent, or browser-library overrides. This checks packaging/import/CLI execution, not browser launch or live inference.
 
 ## Boundaries
 
@@ -22,4 +22,4 @@ External CLI/MCP/OMP tool transports accept HTTP(S) pages and `about:blank`, not
 
 ## Completion and evidence
 
-The agent separately verifies its outcome against a fresh observation. Tests cover offline transport/guard behavior, while real browser verification must assert rendered DOM outcomes and save screenshots. Native attachment and live model requests remain distinct acceptance evidence; lack of credentials or user Chrome must be disclosed rather than masked by an isolated/mock success. See `research.md` and `../AGENTS.md`.
+The agent separately verifies its outcome against a fresh observation. The final authorized 2026-10-08 suite passed 67 tests in 57.77s, combining offline transport/guard checks, real Chromium rendered-DOM fixtures, CLI/MCP subprocesses and installed OMP tool execution. Main reports focused source security rereview completed with zero unresolved high/medium findings; adversarial Chromium context tests also passed. This is not a blanket security guarantee. Native personal-profile attachment, headed desktop behavior, installed-wheel browser launch and live model requests remain unverified; controlled attached-browser fixtures and clean-wheel doctor do not establish those distinct acceptance categories. See `research.md` and `../AGENTS.md`.

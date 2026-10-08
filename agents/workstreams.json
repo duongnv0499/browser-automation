@@ -1,7 +1,7 @@
 {
   "goal": "Production-usable Python browser automation with explicit native Chrome consent or isolated launch, OpenRouter-primary/OpenAI Decisions, guarded observation/control, CLI/MCP and available OMP integration.",
   "parent_role": "Research initially; then PM, architecture and review only. Workers implement and repair owned paths.",
-  "git_owner": "Harness serializes staging exact owned paths, feature commits and pushes on shared main; no force/reset or git add .",
+  "git_owner": "Harness serialized feature commits/pushes; ownership transferred to HarnessFinal for the final integration evidence and unified verification release commits/push. Stage exact owned paths only; no force/reset or git add .",
   "verification_gate": "All workers READY first; parent authorizes unified checks. No mid-flight tests/builds/lint/smokes.",
   "ownership": {
     "Harness": ["AGENTS.md", "agents/worker-instructions.md", "agents/workstreams.json", "README.md", "pyproject.toml", "uv.lock", ".gitignore", ".env.example", "src/browser_automation/__init__.py", "docs/architecture.md", "docs/research.md", "CHANGELOG.md"],
@@ -28,21 +28,120 @@
     "Browser-only, deterministic-loop and live-model measurements are separate; no unmatched superiority claims",
     "Stable feature commits are pushed or concrete remote errors reported"
   ],
-  "harness_state": {"phase": "All workers READY; scoped verification authorized; unified Harness suite/build remains gated until stable worker PASS and parent authorization", "installation": "uv sync installed locked dependencies successfully", "checks_run": [], "user_doc_preserved": true, "pushed_milestones": ["9e2fa16 bootstrap", "87a6952 providers", "921b8c2 agent", "8a4e12c practical docs", "ff8e6b3 architecture correction", "f4919b7 integrations", "95d8094 native-first CLI docs", "a627322 approval/cancellation", "8716a25 choice paging", "0356325 host executable env", "76f8c22 protocol/select refinement", "a086698 cancellation regression", "3839daf observed form policy", "60aed36 tool page-scheme security", "833ab92 transport security docs", "4d5fa97 tool schema/lifecycle", "6e959ba popup/text/visual progress", "66d194c active-tab approval", "5925957 review checkpoint", "75fe69b isolated-world browser"]},
+  "harness_state": {
+    "phase": "Final unified verification complete; final documentation/state release commit and push assigned to HarnessFinal",
+    "installation": "Checkout doctor and clean installed-wheel doctor passed; uv build produced 0.1.0 sdist/wheel",
+    "checks_run": [
+      {
+        "command": "BROWSER_AGENT_LIBRARY_PATH=/home/claw/.local/lib/chromium/usr/lib/x86_64-linux-gnu BROWSER_INTEGRATION_TESTS=1 uv run --with mcp pytest",
+        "result": "67 passed in 57.77s",
+        "wall_seconds": 59.26,
+        "source_commit": "33444dd8d0e928d1a60bad4507c4d97c8aac7057"
+      },
+      {
+        "command": "uv build",
+        "result": "sdist/wheel built; archive inspection confirmed browser_automation/snapshot.js",
+        "wall_seconds": 1.86,
+        "inspection_note": "unzip unavailable (exit 127); specialized archive reader used"
+      },
+      {
+        "command": "uv run browser-agent doctor",
+        "result": "Playwright true; provider keys false; sessions empty; native consent false",
+        "wall_seconds": 0.4
+      },
+      {
+        "command": "env -i HOME=/tmp/browser-final-clean-home PATH=/home/claw/.local/bin:/usr/local/bin:/usr/bin:/bin UV_CACHE_DIR=/tmp/browser-final-wheel-cache uv run --no-project --with /home/claw/browser-automation/dist/browser_automation-0.1.0-py3-none-any.whl browser-agent doctor",
+        "cwd": "/tmp",
+        "result": "Clean installed wheel doctor passed without checkout project/browser library overrides/provider keys/native consent",
+        "wall_seconds": 3.34
+      }
+    ],
+    "user_doc_preserved": true,
+    "pushed_commits_before_gate": [
+      "91750ba341383758820889c9f7e6fc15b6394f80",
+      "9e2fa1636b1e4bca5e790005638c5f1f45f03fb1",
+      "87a69521d0cd606fd58e9ae8eff532966c389d95",
+      "921b8c2490ad6a1be3947fe07ae40ea2480a3ff9",
+      "8a4e12cbaf806850a54c22e876663a495c5b5ac2",
+      "ff8e6b3159967ea315fcfa365040488cbb2b1581",
+      "f4919b764bce3ce7f416485fbdd47874a690d772",
+      "95d8094503939598b26a2b9db73d3756feedb95d",
+      "a62732257147f700eb4cc087fb483de184c29e96",
+      "8716a250722a8f1427e7e07916696b38fe587f16",
+      "035632596d3517a2e6b608efc1f8a9e97642b429",
+      "76f8c224598fc70cfd188ad7de46581e92577074",
+      "a0866988f2a45b484f4aacc027344b20008cb49b",
+      "3839daf6054c781962dc9e468b8160173fc8291a",
+      "60aed36ebc4aee108c47d43140a0704fa2ce7c8c",
+      "833ab9275c4388ae4707ed0cefb6b226ebb5653f",
+      "4d5fa9735a9ce2acee87a257da4285eb81604064",
+      "6e959ba4d4202e29d14faed9cd4c256f455cd123",
+      "66d194c0994412c3d51d592dd784702979df8d2d",
+      "59259574a32ac277beb01e6998059dfc66e81ead",
+      "75fe69b6e5a99da383efb2c8bef6db3733934347",
+      "01a2b64b42af9806551bde3c1586b13ef0b8b4b6",
+      "535cc9494fb66c85f990c4f3d45d659886daf898",
+      "0255f3766893fe26e93abf657da0d634f033063b",
+      "2132ee44bd02f2a90bcfa49cae7846303f1b7a83",
+      "08608562393860a2d6e01f453afeb30be49aeb49",
+      "251d9faae90d7f51447f397b0ea709d1378cb7e0",
+      "160bd4a7b8a5cd8f758e493e42bff839956ca085",
+      "75342d7c4a32bc62483a40d1cbd351e81a6ed742",
+      "33444dd8d0e928d1a60bad4507c4d97c8aac7057"
+    ],
+    "integration_evidence_commit": "d6810587e50497f89d1b328673e79a69bb8dfb1c",
+    "release_commit_reference": "Final verification commit hash and successful origin/main push are reported by HarnessFinal hand-off; self-hash cannot be embedded in its own content",
+    "artifacts": {
+      "gate_summary": "/tmp/browser-final-unified-verification.json",
+      "unified_fixtures": "/tmp/pytest-of-claw/pytest-1743/",
+      "wheel": "dist/browser_automation-0.1.0-py3-none-any.whl",
+      "wheel_sha256": "ccf2d99fed89f495de1ba2003006ebd7736776e6c6c20b5516a888a9ce01cc01",
+      "sdist_sha256": "0ff7aacb7bfc59cdafae6ec13adfdc01356428bb67a8e5f5a286983cc849acc0"
+    },
+    "artifact_boundary": "Machine-local temporary evidence; not public durable links; wheel built before documentation-only release commit"
+  },
   "parent_phase": {
-    "completed_todos": 7,
-    "total_todos": 10,
-    "complete_categories": ["four research work items", "Harness", "Decision", "Integration"],
-    "decision_status": "READY after joint-choice paging, observed multiselect, screenshot-progress hashing, popup routing and same-revision text windows",
-    "integration_status": "READY after complete action schema, bounded lifecycle/locks, targeted tab_url checks, text-only screenshot flag and popup-bound approval",
-    "browser_status": "READY at 75fe69b: isolated-world authority, native frame trees, pinned POSIX file transfers, safe press, tab_url, observation caps and fixtures implemented",
-    "runtime_review": "14 parent findings assigned to owning workers; repairs ready for scoped verification",
-    "security_review": "Focused rereview now authorized for page authority, local-file URL leakage and file TOCTOU repairs; no passing conclusion yet",
-    "verification": "Scoped Browser, Decision and Integration checks authorized NOW by Main, running concurrently; SecurityReview focused rereview. Harness unified full suite/build/package-resource/installed-wheel execution waits for stable scoped PASS and a further parent authorization.",
-    "deployment_verification": "Browser host-library repair uses explicit LD_LIBRARY_PATH for smokes only. No hardcoded /home/claw path or package-import loader mutation; Browser restores only its own .bashrc addition. Harness final proof requires wheel CLI doctor in clean environment (no browser libraries needed), plus browser smoke with explicit deployment environment. Untracked user .env is allowed.",
-    "decision_evidence": {"offline_scoped": "21 passed before host-library repair; initial real-browser launch failed due to missing shared libraries", "real_loop": "Repaired configured scenario 1 passed in 3.31s; screenshot/DOM shows Query hello and Submitted: hello; parent and Harness opened evidence", "requests": "5 actual loopback HTTP requests, 3 choice + field text + independent verify, each one image part; deterministic fixture, not live Luna", "metrics_ms": {"browser": 1203.12, "local_provider": 57.91, "agent_elapsed": 1281.72}, "artifacts": "/tmp/browser-decision-proof-configured/test_real_browser_local_determ0/deterministic-agent-{outcome.png,outcome.json,request-evidence.json}", "unified": "pending"},
-    "unavailable": ["live model API keys", "personal logged-in user Chrome", "headed desktop"],
-    "claims": "No superiority benchmark proof. Real fixture, native personal-profile and paid-provider evidence must remain separate."
+    "complete_categories": [
+      "research documentation",
+      "Browser scoped verification",
+      "Decision scoped verification",
+      "Integration scoped verification",
+      "focused security source rereview",
+      "final unified test/build/wheel-resource/clean doctor gate"
+    ],
+    "decision_status": "Scoped tests and deterministic local HTTP-provider real-browser loop passed; no live model call",
+    "integration_status": "CLI, official MCP SDK 2.3.0 and installed OMP registration/execution tests passed in unified suite; no model-driven OMP task",
+    "browser_status": "16/16 Browser scoped tests and controlled attachment preservation check passed; all Browser tests also passed in unified suite",
+    "runtime_review": "Assigned source repairs implemented and included in final 67-pass unified suite",
+    "security_review": "Main reports focused read-only source inspection completed with zero unresolved high/medium findings: isolated CDP worlds, prohibited URL schemes, POSIX dirfd-pinned ScopedFiles; adversarial Chromium fixtures passed in tests/test_browser_context.py",
+    "security_evidence": "agent://SecurityReview/findings",
+    "verification": "Authorized final unified gate complete: 67 passed in 57.77s, no reported skips/failures; uv build, packaged snapshot.js inspection, checkout doctor and clean installed-wheel doctor passed",
+    "deployment_verification": "Real Chromium tests explicitly configured BROWSER_AGENT_LIBRARY_PATH=/home/claw/.local/lib/chromium/usr/lib/x86_64-linux-gnu; clean installed-wheel doctor needed no browser libraries. Host-specific path is deployment configuration, not package default. Installed-wheel browser launch not exercised.",
+    "decision_evidence": {
+      "offline_scoped": "21 offline passes; initial browser launch failed due to missing host libraries; 3 later multi-select/evidence checks passed",
+      "real_loop": "Configured scenario 1 passed in 3.31s; screenshot/DOM shows Query hello and Submitted: hello; parent and Harness opened evidence",
+      "requests": "5 actual loopback HTTP requests: 3 choice, 1 field text, 1 independent verify; each one image part; deterministic fixture, not live Luna",
+      "metrics_ms": {
+        "browser": 1203.12,
+        "local_provider": 57.91,
+        "agent_elapsed": 1281.72
+      },
+      "artifacts": "/tmp/browser-decision-proof-configured/test_real_browser_local_determ0/deterministic-agent-{outcome.png,outcome.json,request-evidence.json}",
+      "unified": "Passed as part of final 67-test gate; prior timing values remain scoped-run measurements"
+    },
+    "unavailable": [
+      "live model API keys",
+      "personal logged-in user Chrome",
+      "headed desktop"
+    ],
+    "unverified": [
+      "live Luna/provider execution",
+      "personal Chrome attachment (no profile hijacked)",
+      "headed desktop behavior",
+      "installed-wheel browser launch",
+      "matched Jev/Codex comparison"
+    ],
+    "claims": "Controlled fixture attachment, real browser, synthetic local-provider and paid-provider evidence remain separate; no superiority or blanket security guarantee"
   },
   "resume": "Re-read AGENTS.md, this file, own state, and current owned source; retain scope/research/security/verification/commit rules."
 }

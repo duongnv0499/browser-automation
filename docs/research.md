@@ -35,7 +35,7 @@ The rendered PNG and DOM outcome show the Query field filled with `hello` and vi
 
 For this single local fixture run, recorded agent metrics were browser work **1,203.12 ms**, local-provider work **57.91 ms**, and total agent elapsed **1,281.72 ms**, with zero stale reobservations. These are instrumentation categories within one deterministic task, not standalone browser microbenchmarks, paid-model latency, headed-desktop proof, or general reliability evidence. The worker ran the scenario with explicit `BROWSER_AGENT_LIBRARY_PATH` deployment configuration; installation of host libraries is separate from package functionality.
 
-Original evidence stays local and untracked under `/tmp/browser-decision-proof-configured/test_real_browser_local_determ0/`: `deterministic-agent-outcome.png`, `deterministic-agent-outcome.json`, and `deterministic-agent-request-evidence.json`. Parent and Harness opened the rendered PNG and outcome metadata. Unified full-suite and installed-wheel verification remain pending; no native personal-profile or live-provider success is claimed.
+Original evidence stays local and untracked under `/tmp/browser-decision-proof-configured/test_real_browser_local_determ0/`: `deterministic-agent-outcome.png`, `deterministic-agent-outcome.json`, and `deterministic-agent-request-evidence.json`. Parent and Harness opened the rendered PNG and outcome metadata. The final unified suite and installed-wheel doctor subsequently passed as recorded below; no native personal-profile or live-provider success is claimed.
 
 ### Browser-only fixture and attached-session checks
 
@@ -47,6 +47,75 @@ Harness opened `/tmp/browser-engine-proof/browser-proof.png` and `.json`: the re
 
 The Integration worker's final scoped command was `BROWSER_AGENT_LIBRARY_PATH=/home/claw/.local/lib/chromium/usr/lib/x86_64-linux-gnu BROWSER_INTEGRATION_TESTS=1 uv run --with mcp pytest tests/test_service.py tests/test_service_stdio.py tests/test_service_omp.py --basetemp=/tmp/browser-integration-final-proof`, reporting **27 passed in 16.37s**. The SDK is a temporary verification dependency, not a runtime requirement of the stdlib MCP server.
 
-Local evidence under `/tmp/browser-integration-final-proof/` includes real CLI before/after PNGs, official-MCP-client rendered-action/drag/selection/upload/policy PNGs, a controlled attached-session PNG, and `test_actual_omp_extension_load0/omp-proof.json`. Harness opened `mcp-after.png` showing `Rendered SUCCESS`, and OMP metadata showing the installed host registered `browser_agent` and completed the `browser-automation.doctor` probe with `agentInvoked: false`. This proves local tool registration/execution, not a paid OMP model task. The worker's scoped assertions cover the remaining client flows; unified verification is still a separate gate.
+Local evidence under `/tmp/browser-integration-final-proof/` includes real CLI before/after PNGs, official-MCP-client rendered-action/drag/selection/upload/policy PNGs, a controlled attached-session PNG, and `test_actual_omp_extension_load0/omp-proof.json`. Harness opened `mcp-after.png` showing `Rendered SUCCESS`, and OMP metadata showing the installed host registered `browser_agent` and completed the `browser-automation.doctor` probe with `agentInvoked: false`. This proves local tool registration/execution, not a paid OMP model task. The final unified gate below exercises all test files together, separately from these scoped runs.
 
 Fixture secrets, approval records, probe scripts and raw screenshots remain local/untracked. No real personal-profile, live Luna, CAPTCHA/detection-bypass, or matched competitor benchmark claim follows from these tests.
+
+### Final unified verification gate
+
+On **2026-10-08**, HarnessFinal exercised the following against source commit `33444dd8d0e928d1a60bad4507c4d97c8aac7057` (later changes are documentation/state only):
+
+| Check | Exact exercised outcome |
+| --- | --- |
+| `BROWSER_AGENT_LIBRARY_PATH=/home/claw/.local/lib/chromium/usr/lib/x86_64-linux-gnu BROWSER_INTEGRATION_TESTS=1 uv run --with mcp pytest` | **67 passed in 57.77s**, wall 59.26s; Python 3.13.12, pytest 9.1.1; all seven test files ran with no skips/failures reported. |
+| `uv build` | Built `dist/browser_automation-0.1.0.tar.gz` and `dist/browser_automation-0.1.0-py3-none-any.whl`, wall 1.86s. |
+| Wheel resource inspection | Archive reader confirmed `browser_automation/snapshot.js` (7.9KB). `unzip -l` could not run because `unzip` is absent (exit 127); the archive inspection supplied equivalent resource-presence evidence. |
+| `uv run browser-agent doctor` | Passed, wall 0.40s: Playwright available, both provider keys false, no sessions, native consent false. |
+| Clean installed-wheel doctor | Passed from `/tmp`, wall 3.34s, same diagnostic state; new uv cache installed 11 packages. No checkout/project, provider credentials, browser-library overrides, or native consent supplied. |
+
+Clean-wheel command:
+
+```bash
+env -i HOME=/tmp/browser-final-clean-home \
+  PATH=/home/claw/.local/bin:/usr/local/bin:/usr/bin:/bin \
+  UV_CACHE_DIR=/tmp/browser-final-wheel-cache \
+  uv run --no-project \
+  --with /home/claw/browser-automation/dist/browser_automation-0.1.0-py3-none-any.whl \
+  browser-agent doctor
+```
+
+Wheel SHA-256: `ccf2d99fed89f495de1ba2003006ebd7736776e6c6c20b5516a888a9ce01cc01`. Sdist SHA-256: `0ff7aacb7bfc59cdafae6ec13adfdc01356428bb67a8e5f5a286983cc849acc0`. These identify the artifacts built before this documentation-only release commit; rebuilding later can produce different artifact hashes.
+
+The local gate summary is `/tmp/browser-final-unified-verification.json`. Unified-run fixture artifacts are under `/tmp/pytest-of-claw/pytest-1743/`, including `test_real_browser_local_determ0/deterministic-agent-{outcome.png,outcome.json,request-evidence.json}`, `test_mcp_official_client_real_0/{mcp-before.png,mcp-after.png,mcp-dragged.png,mcp-cleared.png,mcp-policy-guarded.png,mcp-uploaded.png}`, and `test_actual_omp_extension_load0/omp-proof.json`. These paths are machine-local, untracked and temporary, not guaranteed durable public downloads. They are distinct from the earlier scoped artifact paths above; prior timing figures were not remeasured as benchmarks by this gate.
+
+Main reports the focused read-only security rereview completed with **zero unresolved high/medium findings**, resolving isolated CDP-world authority, prohibited URL-scheme checks, and POSIX dirfd-pinned `ScopedFiles` boundaries. Its evidence is `agent://SecurityReview/findings`. The final suite passed the adversarial real Chromium fixtures in `tests/test_browser_context.py`. This is source-review plus tested-boundary evidence, not a blanket security guarantee.
+
+**Explicitly unverified:** live Luna/OpenRouter/OpenAI paid calls (no live keys); attachment to a personal logged-in Chrome profile (none attached or hijacked); headed interactive desktop operation; installed-wheel browser launch; CAPTCHA/detection bypass; and matched Jev/Codex performance. The controlled attached-browser test exercises fixture preservation rather than a user's profile. Official MCP SDK 2.3.0 interoperability and OMP local tool execution do not prove every client/version or a model-driven OMP task.
+
+### Exact commit ledger
+
+The following ordered repository history identifies implementation and evidence milestones. Commits through `33444dd` were already pushed to `origin/main` before this gate. `d681058` records the remaining Integration-owned documentation/state; it is pushed together with the final documentation verification commit. The latter cannot embed its own Git hash without changing that hash: the final hand-off reports its exact hash and successful push result.
+
+```text
+91750ba341383758820889c9f7e6fc15b6394f80
+9e2fa1636b1e4bca5e790005638c5f1f45f03fb1
+87a69521d0cd606fd58e9ae8eff532966c389d95
+921b8c2490ad6a1be3947fe07ae40ea2480a3ff9
+8a4e12cbaf806850a54c22e876663a495c5b5ac2
+ff8e6b3159967ea315fcfa365040488cbb2b1581
+f4919b764bce3ce7f416485fbdd47874a690d772
+95d8094503939598b26a2b9db73d3756feedb95d
+a62732257147f700eb4cc087fb483de184c29e96
+8716a250722a8f1427e7e07916696b38fe587f16
+035632596d3517a2e6b608efc1f8a9e97642b429
+76f8c224598fc70cfd188ad7de46581e92577074
+a0866988f2a45b484f4aacc027344b20008cb49b
+3839daf6054c781962dc9e468b8160173fc8291a
+60aed36ebc4aee108c47d43140a0704fa2ce7c8c
+833ab9275c4388ae4707ed0cefb6b226ebb5653f
+4d5fa9735a9ce2acee87a257da4285eb81604064
+6e959ba4d4202e29d14faed9cd4c256f455cd123
+66d194c0994412c3d51d592dd784702979df8d2d
+59259574a32ac277beb01e6998059dfc66e81ead
+75fe69b6e5a99da383efb2c8bef6db3733934347
+01a2b64b42af9806551bde3c1586b13ef0b8b4b6
+535cc9494fb66c85f990c4f3d45d659886daf898
+0255f3766893fe26e93abf657da0d634f033063b
+2132ee44bd02f2a90bcfa49cae7846303f1b7a83
+08608562393860a2d6e01f453afeb30be49aeb49
+251d9faae90d7f51447f397b0ea709d1378cb7e0
+160bd4a7b8a5cd8f758e493e42bff839956ca085
+75342d7c4a32bc62483a40d1cbd351e81a6ed742
+33444dd8d0e928d1a60bad4507c4d97c8aac7057
+d6810587e50497f89d1b328673e79a69bb8dfb1c
+```

@@ -155,13 +155,17 @@ CDP can access sensitive data throughout the profile. Models receive selected pa
 
 No matched benchmark against Jev or Codex has been run. Browser-only latency, deterministic local-provider loop latency, and live paid-model end-to-end latency are distinct metrics. Offline provider tests do not prove a paid live API call; an isolated fixture does not prove attachment to a logged-in user profile. See [dated research and evidence boundaries](docs/research.md).
 
-After all implementation work is ready and the parent authorizes coordinated verification:
+The authorized final unified gate on **2026-10-08** passed **67 tests in 57.77s** (Python 3.13.12), including real Chromium fixtures, the official MCP client, CLI subprocesses, and installed OMP tool registration:
 
 ```bash
-uv run pytest
+BROWSER_AGENT_LIBRARY_PATH=/home/claw/.local/lib/chromium/usr/lib/x86_64-linux-gnu \
+  BROWSER_INTEGRATION_TESTS=1 uv run --with mcp pytest
 uv build
+uv run browser-agent doctor
 ```
 
-Real-browser checks require installed browsers and appropriate OS dependencies. Live provider checks need real keys/model access; native current-profile checks need opted-in running Chrome and explicit user approval. Save screenshots plus rendered DOM outcomes, not just a model's completion claim.
+The library path above is this verification host's explicit browser dependency configuration, not a portable installation default. `uv build` produced the 0.1.0 sdist/wheel; archive inspection confirmed `browser_automation/snapshot.js`. Doctor passed both from the checkout and from the wheel installed by `uv run --no-project --with /absolute/path/to/package.whl` in a clean environment outside the checkout. Both reported Playwright available, no provider keys, no sessions, and native consent disabled. Doctor is an import/CLI check, not browser-launch or model proof.
+
+Exact commands, artifact paths, checksums, measurements, and the pushed implementation commit ledger are in [research evidence](docs/research.md). No live Luna keys were available; no personal Chrome profile was attached or hijacked. Controlled attached-browser fixtures prove preservation of fixture tabs/cookies, not access to a user's logged-in profile. Headed-desktop behavior and matched Jev/Codex comparisons remain unverified.
 
 See [AGENTS.md](AGENTS.md), [worker instructions](agents/worker-instructions.md), [durable workstreams](agents/workstreams.json), and [changelog](CHANGELOG.md). Preserve the user's `doc.md`. Workers implement scoped features; the parent manages/reviews; Harness serializes feature commits and pushes.
