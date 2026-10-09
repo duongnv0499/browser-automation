@@ -20,7 +20,11 @@ async def json_lines(service=None):
     async def handle(request):
         rid = request.get("id")
         try:
-            result = await service.dispatch(request["command"], request.get("arguments", {}))
+            async def report(event):
+                if not asyncio.current_task().cancelling():
+                    send({"id": rid, "progress": event})
+            options = {"on_progress": report} if request.get("progress") is True else {}
+            result = await service.dispatch(request["command"], request.get("arguments", {}), **options)
             send({"id": rid, "result": result})
         except asyncio.CancelledError:
             send({"id": rid, "error": {"code": "cancelled", "message": "Request cancelled; session retained"}})
@@ -62,10 +66,18 @@ async def once(args):
             result = await service.dispatch("doctor")
         else:
             setup = "connect" if args.endpoint else ("launch" if args.command == "launch" or args.isolated else "connect_default")
-            opened = await service.dispatch(setup, {"endpoint": args.endpoint, "headless": args.headless, "executable_path": args.executable_path})
+            setup_args = {"endpoint": args.endpoint} if setup == "connect" else ({"headless": args.headless} if setup == "launch" else {})
+            opened = await service.dispatch(setup, setup_args)
             if args.command == "run":
-                tab = (await service.dispatch("new_tab", {"session_id": opened["session_id"], "url": args.url}))["tab"]
-                result = await service.dispatch("run", {"session_id": opened["session_id"], "tab_id": tab["id"], "goal": args.goal, "provider": args.provider, "model": args.model, "max_steps": args.max_steps, "screenshot": args.screenshot})
+                tab = (await service.dispatch("new_tab", {"session_id": opened["session_id"], "url": args.url, "wait_until": args.wait_until, "timeout_ms": args.timeout_ms}))["tab"]
+                async def report(event):
+                    print(json.dumps({"progress": event}, ensure_ascii=False), flush=True)
+                run_args = {"session_id": opened["session_id"], "tab_id": tab["id"], "goal": args.goal, "provider": args.provider, "max_steps": args.max_steps, "interpret_visual": args.interpret_visual}
+                if args.model is not None:
+                    run_args["model"] = args.model
+                if args.screenshot is not None:
+                    run_args["screenshot"] = args.screenshot
+                result = await service.dispatch("run", run_args, on_progress=report if args.progress else None)
             else:
                 print(json.dumps(opened), flush=True)
                 await json_lines(service)
@@ -118,6 +130,10 @@ def main():
             p.add_argument("--provider", choices=["openrouter", "openai"], default="openrouter")
             p.add_argument("--model")
             p.add_argument("--max-steps", type=int, default=50)
+            p.add_argument("--wait-until", choices=["commit", "domcontentloaded", "load", "networkidle"], default="domcontentloaded")
+            p.add_argument("--timeout-ms", type=int, default=15000)
+            p.add_argument("--interpret-visual", action="store_true", help="Paid semantic screenshot interpretation with explicit provenance")
+            p.add_argument("--progress", action="store_true", help="Emit semantic progress JSON before final result")
             vision = p.add_mutually_exclusive_group()
             vision.add_argument("--screenshot", dest="screenshot", action="store_true", default=None, help="Explicitly enable visual observations")
             vision.add_argument("--no-screenshot", dest="screenshot", action="store_false", default=None, help="Text-only observations; default follows provider capability")

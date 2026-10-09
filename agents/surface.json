@@ -1,0 +1,19 @@
+{
+  "owner": "Surface",
+  "phase": "implementing consumer regressions; verification not authorized",
+  "owned_paths": ["src/browser_automation/service.py", "src/browser_automation/mcp.py", "src/browser_automation/mcp_http.py", "src/browser_automation/cli.py", "integrations/omp/browser-tools.mjs", "pyproject.toml", "uv.lock", ".env.example", "tests/test_service.py", "tests/test_service_stdio.py", "tests/test_service_omp.py", "tests/test_mcp_http.py", "tests/test_mcp_http_browser.py", "tests/test_agent_surface.py", "agents/surface.json"],
+  "contracts": {
+    "navigation": "new_tab and reload expose wait_until commit/domcontentloaded/load/networkidle and timeout_ms 1..120000",
+    "monitoring": "six tab-local network/websocket start/list/stop tools; host payload env opt-in independent of model",
+    "visual": "observe interpret_visual forces screenshot, returns visual_summary+page_state provenance or explicit visual_interpretation_error preserving usable DOM",
+    "progress": "dispatch per-request on_progress; JSONL top-level progress true; MCP stdio token notifications; SDK HTTP ctx.session.report_progress; OMP fourth execute callback onUpdate does not resolve interim responses",
+    "validation": "shared JSON Schema validation applied to every service request; jsonschema runtime core dependency; Pillow runtime dependency for BrowserCore exact pixel crops"
+  },
+  "research": [
+    {"url": "https://py.sdk.modelcontextprotocol.io/handlers/progress/index.md", "access_date": "2026-10-09", "fact": "async per-call progress_callback(progress,total,message); no total for unknown work; request metadata opt-in"},
+    {"url": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/docs/extensions.md", "access_date": "2026-10-09", "fact": "registered tool execute(_toolCallId,params,_signal,_onUpdate,_ctx)"},
+    {"path": ".venv/lib/python3.13/site-packages/mcp/server/session.py", "fact": "SDK 2.3 public lowlevel request ctx.session.report_progress(progress,total=None,message=None); no-op without caller progress token"}
+  ],
+  "verification": {"executed": [], "dependency_resolution": "uv lock completed; added Pillow12.3.0", "required": "parent coordinated unit/global suite and opt-in official SDK stdio modern/legacy HTTP browser progress consumers; CLI cancellation; actual OMP loader/persistent update parser"},
+  "limitations": ["No live paid provider keys or native user profiles available; deterministic HTTP provider explicitly labeled not live inference quality", "Preserve doc.md and issues files unchanged"]
+}

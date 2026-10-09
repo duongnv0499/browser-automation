@@ -17,6 +17,10 @@ export default function browserTools(pi) {
       try { response = JSON.parse(line); } catch { return; }
       const waiter = pending.get(response.id);
       if (!waiter || waiter.child !== child) return;
+      if (response.progress !== undefined) {
+        waiter.onUpdate?.({ content: [{ type: "text", text: JSON.stringify({ progress: response.progress }) }], details: { request_id: response.id, progress: response.progress } });
+        return;
+      }
       pending.delete(response.id);
       response.error ? waiter.reject(new Error(`${response.error.code}: ${response.error.message}`)) : waiter.resolve(response.result);
     });
@@ -32,12 +36,12 @@ export default function browserTools(pi) {
   const browserTool = {
     name: "browser_agent",
     label: "Browser Agent",
-    description: "Persistent local browser sessions. First launch isolated or connect consented loopback Chrome, then retain session_id/tab_id/observation revision. Observe screenshot, act bound targets, paginate text, run Luna goal. File operations require exact HOST approval; no approval mint tool. No selectors/JS. Closing attached session preserves user Chrome.",
+    description: "Persistent browser sessions. Choose isolated launch or consented native attach, retain IDs, then run an explicit goal with bounded steps, semantic progress and independent verification. Observe DOM coverage/page-state diagnostics; interpret_visual opt-in charges provider. Snapshot-bound reload needs host approval unless explicit host recovery policy allows. network/websocket start/list/stop capture bounded tab-local metadata. No selectors/JS or safety bypass. Attached close preserves user Chrome.",
     parameters: z.object({
-      command: z.enum(["doctor", "launch", "connect", "connect_default", "tabs", "new_tab", "observe", "act", "approved_act", "text", "run", "upload", "download", "close_tab", "close"]),
+      command: z.enum(["doctor", "launch", "connect", "connect_default", "tabs", "new_tab", "observe", "act", "approved_act", "text", "run", "upload", "download", "close_tab", "close", "network_start", "network_list", "network_stop", "websocket_start", "websocket_list", "websocket_stop"]),
       arguments: z.record(z.string(), z.unknown()).optional(),
     }),
-    async execute(_id, params, signal) {
+    async execute(_id, params, signal, onUpdate) {
       if (signal?.aborted) throw new Error("Cancelled");
       start();
       const child = worker;
@@ -50,8 +54,8 @@ export default function browserTools(pi) {
         };
         signal?.addEventListener("abort", abort, { once: true });
         const finish = fn => value => { signal?.removeEventListener("abort", abort); fn(value); };
-        pending.set(id, { child, resolve: finish(resolve), reject: finish(reject) });
-        child.stdin.write(JSON.stringify({ id, command: params.command, arguments: params.arguments || {} }) + "\n", error => {
+        pending.set(id, { child, resolve: finish(resolve), reject: finish(reject), onUpdate });
+        child.stdin.write(JSON.stringify({ id, command: params.command, arguments: params.arguments || {}, progress: typeof onUpdate === "function" }) + "\n", error => {
           if (error) { pending.delete(id); finish(reject)(error); }
         });
       });

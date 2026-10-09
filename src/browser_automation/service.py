@@ -51,6 +51,8 @@ class BrowserService:
         self.approvals_file = os.environ.get("BROWSER_APPROVALS_FILE")
         self.files_directory = os.environ.get("BROWSER_FILES_DIRECTORY")
         self.pending_actions: dict[tuple[str, str, str], dict] = {}
+        from .page_state import recovery_policy_from_env
+        self.recovery_policy = recovery_policy_from_env()
 
     def _approve(self, binding: dict, token: str | None = None) -> bool:
         if not self.approvals_file or not Path(self.approvals_file).exists():
@@ -65,8 +67,10 @@ class BrowserService:
                 return True
         return False
 
-    async def dispatch(self, command: str, arguments: dict | None = None) -> dict:
+    async def dispatch(self, command: str, arguments: dict | None = None, *, on_progress=None) -> dict:
         args = dict(arguments or {})
+        from .mcp import validate_arguments
+        validate_arguments(command, args)
         if command == "doctor":
             return {"python_playwright": importlib.util.find_spec("playwright") is not None,
                     "openrouter_key": bool(os.environ.get("OPENROUTER_API_KEY")),
@@ -104,18 +108,34 @@ class BrowserService:
             browser = self.sessions.get(sid)
             if browser is None:
                 raise ServiceError("unknown_session", "Session has closed")
-            if command in {"observe", "act", "approved_act", "run", "upload", "download"}:
+            if command in {"observe", "act", "approved_act", "run", "upload", "download", "network_start", "network_list", "network_stop", "websocket_start", "websocket_list", "websocket_stop"}:
                 web_url(await browser.tab_url(args["tab_id"]))
             if command == "tabs":
                 return {"tabs": await browser.tabs()}
             if command == "new_tab":
                 url = web_url(args.get("url", "about:blank"))
-                return {"tab": await browser.new_tab(url)}
+                return {"tab": await browser.new_tab(url, wait_until=args.get("wait_until", "domcontentloaded"), timeout_ms=args.get("timeout_ms", 15000))}
             if command == "observe":
                 limit = args.get("max_text", 12000)
                 if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100000:
                     raise ServiceError("invalid_argument", "max_text must be 1..100000")
-                observation = await browser.observe(args["tab_id"], screenshot=args.get("screenshot", False), max_text=limit)
+                interpret_visual = args.get("interpret_visual", False)
+                observation = await browser.observe(args["tab_id"], screenshot=args.get("screenshot", False) or interpret_visual, max_text=limit)
+                from .page_state import compose_page_state
+                visual = None
+                if interpret_visual:
+                    from .providers import DecisionProvider
+                    provider = None
+                    try:
+                        provider = DecisionProvider.from_env(provider=args.get("provider", "openrouter"), model=args.get("model"))
+                        visual = await provider.interpret_visual(observation)
+                        observation["visual_summary"] = visual
+                    except Exception as exc:
+                        observation["visual_interpretation_error"] = error_payload(exc)
+                    finally:
+                        if provider is not None:
+                            await provider.close()
+                observation["page_state"] = compose_page_state(observation, visual=visual, policy=self.recovery_policy)
                 full = dict(observation)
                 full.pop("screenshot", None)
                 key = (sid, observation["id"])
@@ -138,7 +158,7 @@ class BrowserService:
                 snapshot = self.snapshots.get((sid, action["observation_id"]))
                 if snapshot is None or snapshot["tab_id"] != args["tab_id"]:
                     raise ServiceError("unknown_observation", "Observe this tab before acting")
-                reason = BrowserAgent._approval_reason(action, snapshot)
+                reason = BrowserAgent._approval_reason(action, snapshot, recovery_policy=self.recovery_policy)
                 if reason:
                     import copy
                     binding = {"session_id": sid, "tab_id": args["tab_id"], "observation_id": action["observation_id"],
@@ -187,7 +207,7 @@ class BrowserService:
                     screenshot = args.get("screenshot")
                     if screenshot is None:
                         screenshot = provider.capabilities["vision"]
-                    agent = BrowserAgent(browser, provider, max_steps=args.get("max_steps", 50), approval=approve, screenshot=screenshot)
+                    agent = BrowserAgent(browser, provider, max_steps=args.get("max_steps", 50), approval=approve, screenshot=screenshot, on_progress=on_progress, recovery_policy=self.recovery_policy, interpret_visual=args.get("interpret_visual", False))
                     result = await agent.run(args["tab_id"], args["goal"])
                     if result.get("status") == "approval_required" and result.get("approval"):
                         binding = {"session_id": sid, **result["approval"]}
@@ -207,6 +227,16 @@ class BrowserService:
                     return result
                 finally:
                     await provider.close()
+            if command in {"network_start", "network_list", "network_stop", "websocket_start", "websocket_list", "websocket_stop"}:
+                kind, operation = command.split("_")
+                tab_id = args.pop("tab_id")
+                if operation == "start":
+                    if args.get("payloads", False) and os.environ.get("BROWSER_MONITOR_PAYLOADS") != "1":
+                        raise ServiceError("host_policy_required", "Text payload capture requires host BROWSER_MONITOR_PAYLOADS=1; metadata remains available")
+                    return await browser.monitor_start(tab_id, kind, **args)
+                if operation == "list":
+                    return await browser.monitor_list(tab_id, kind, **args)
+                return await browser.monitor_stop(tab_id, kind)
             if command == "close":
                 await browser.close()
                 self.sessions.pop(sid, None)
@@ -241,4 +271,13 @@ class BrowserService:
 
 def error_payload(exc: Exception) -> dict:
     # Errors are returned to the caller, never emitted to routine diagnostic logs.
-    return {"code": getattr(exc, "code", type(exc).__name__), "message": str(exc)}
+    code = getattr(exc, "code", None) or {KeyError: "invalid_argument", ValueError: "invalid_argument", TimeoutError: "timeout"}.get(type(exc), "operation_failed")
+    result = {"code": code, "message": str(exc)}
+    details = getattr(exc, "details", None)
+    if isinstance(details, dict):
+        result["details"] = details
+    diagnostic = getattr(exc, "diagnostic", None)
+    if isinstance(diagnostic, dict):
+        result["diagnostic"] = diagnostic
+    result["recommended_next_action"] = getattr(exc, "recommended_next_action", None) or ("reobserve" if code in {"stale_observation", "unknown_observation", "covered_target"} else "review_diagnostic")
+    return result

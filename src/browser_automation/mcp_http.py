@@ -216,6 +216,12 @@ def create_app(*, credentials=None, host="127.0.0.1", port=8767, allow_hosts=(),
 
     async def call_tool(ctx, params):
         entry = None
+        progress = 0
+        async def report(event):
+            nonlocal progress
+            if not asyncio.current_task().cancelling():
+                progress += 1
+                await ctx.session.report_progress(progress, message=json.dumps(event, ensure_ascii=False, separators=(",", ":")))
         try:
             if params.name not in schemas:
                 raise ServiceError("unknown_tool", "Unknown tool")
@@ -230,9 +236,9 @@ def create_app(*, credentials=None, host="127.0.0.1", port=8767, allow_hosts=(),
                 async with entry.admission:
                     if len(entry.service.sessions) >= max_browser_sessions:
                         raise ServiceError("capacity", "Browser session limit reached; close an owned session first")
-                    result = await entry.service.dispatch(params.name, args)
+                    result = await entry.service.dispatch(params.name, args, on_progress=report)
             else:
-                result = await entry.service.dispatch(params.name, args)
+                result = await entry.service.dispatch(params.name, args, on_progress=report)
             if params.name == "doctor":
                 result["transport"] = "streamable-http"
             return CallToolResult.model_validate(tool_result(result))

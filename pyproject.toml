@@ -10,11 +10,13 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "httpx>=0.27,<1",
+  "Pillow>=11,<13",
+  "jsonschema>=4.23,<5",
   "playwright>=1.49,<2",
 ]
 
 [project.optional-dependencies]
-http = ["mcp>=2.3,<3", "uvicorn>=0.35,<1", "jsonschema>=4.23,<5"]
+http = ["mcp>=2.3,<3", "uvicorn>=0.35,<1"]
 
 [project.scripts]
 browser-agent = "browser_automation.cli:main"

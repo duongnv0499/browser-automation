@@ -38,13 +38,17 @@ I = {"type": "integer"}
 SESSION = {"session_id": S}
 TAB = {**SESSION, "tab_id": S}
 N = {"type": "number"}
+WAIT_UNTIL = {"type": "string", "enum": ["commit", "domcontentloaded", "load", "networkidle"]}
+TIMEOUT = {"type": "integer", "minimum": 1, "maximum": 120000}
+VISION = {"interpret_visual": B, "provider": {"type": "string", "enum": ["openrouter", "openai"]}, "model": S}
 ACTION = schema({
     "observation_id": S,
-    "operation": {"type": "string", "enum": ["click", "fill", "select", "scroll", "press", "hover", "drag", "wait", "back", "forward"]},
+    "operation": {"type": "string", "enum": ["click", "fill", "select", "scroll", "press", "hover", "drag", "wait", "back", "forward", "reload"]},
     "target": S, "to_target": S, "text": S,
     "value": {"anyOf": [S, {"type": "array", "items": S}]},
     "key": S, "x": N, "y": N, "to_x": N, "to_y": N,
     "delta": N, "delta_x": N, "delta_y": N, "seconds": N,
+    "wait_until": WAIT_UNTIL, "timeout_ms": TIMEOUT,
 }, ("observation_id", "operation"))
 TOOLS = [
     ("doctor", "Dependency/key presence only; no keys or page data.", schema()),
@@ -52,17 +56,36 @@ TOOLS = [
     ("connect", "Attach to consented logged-in Chrome at explicit loopback CDP URL.", schema({"endpoint": S}, ("endpoint",))),
     ("connect_default", "Discover consent-enabled local Chrome; never isolated fallback.", schema()),
     ("tabs", "List persistent session tabs.", schema(SESSION, ("session_id",))),
-    ("new_tab", "Create owned tab in session.", schema({**SESSION, "url": S}, ("session_id",))),
-    ("observe", "Get indexed DOM snapshot. Use its revision for act. Screenshot is a separate image block.", schema({**TAB, "screenshot": B, "max_text": I}, tuple(TAB))),
-    ("text", "Read cached snapshot text continuation without changing revision; capped source reports truncation.", schema({**SESSION, "observation_id": S, "offset": I, "limit": I}, ("session_id", "observation_id"))),
+    ("new_tab", "Create owned tab with bounded navigation; timeout retains tab for inspection.", schema({**SESSION, "url": S, "wait_until": WAIT_UNTIL, "timeout_ms": TIMEOUT}, ("session_id",))),
+    ("observe", "Get usable DOM, coverage and page-state diagnostics. Opt-in interpret_visual sends screenshot to paid provider; provenance/errors remain explicit.", schema({**TAB, "screenshot": B, "max_text": {"type": "integer", "minimum": 1, "maximum": 100000}, **VISION}, tuple(TAB))),
+    ("text", "Read cached snapshot text continuation without changing revision; capped source reports truncation.", schema({**SESSION, "observation_id": S, "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 100000}}, ("session_id", "observation_id"))),
     ("act", "Execute snapshot-bound action, rejecting stale or covered targets; no selectors or JS.", schema({**TAB, "action": ACTION}, (*TAB, "action"))),
     ("approved_act", "Execute exact paused action after host approval; no approval minting. Then run goal again to verify.", schema({**TAB, "observation_id": S, "approval_token": S}, (*TAB, "observation_id", "approval_token"))),
-    ("run", "Autonomous goal, bounded steps and separate completion verification. Risky actions pause for host approval.", schema({**TAB, "goal": S, "provider": {"type": "string", "enum": ["openrouter", "openai"]}, "model": S, "max_steps": I, "screenshot": B}, (*TAB, "goal"))),
+    ("run", "Execute explicit goal with bounded steps, semantic progress and independent verification. Recovery never bypasses host approval.", schema({**TAB, "goal": {"type": "string", "minLength": 1, "maxLength": 16000}, **VISION, "max_steps": {"type": "integer", "minimum": 1, "maximum": 200}, "screenshot": B}, (*TAB, "goal"))),
     ("upload", "Exact host approval and host directory required. Missing approval returns binding for user.", schema({**TAB, "observation_id": S, "target": S, "paths": {"type": "array", "items": S}, "approval_token": S}, (*TAB, "observation_id", "target", "paths"))),
     ("download", "Snapshot-bound download, exact host approval and directory scope required.", schema({**TAB, "action": ACTION, "destination": S, "approval_token": S}, (*TAB, "action", "destination"))),
     ("close_tab", "Close only service-owned tab; cannot close preexisting user tab.", schema(TAB, tuple(TAB))),
     ("close", "Disconnect attached browser without killing user Chrome. Close isolated owned browser.", schema(SESSION, ("session_id",))),
 ]
+for kind in ("network", "websocket"):
+    TOOLS.extend([
+        (f"{kind}_start", f"Start bounded tab-local {kind} monitoring; no bodies/headers. Text payloads need separate host consent.", schema({**TAB, "max_events": {"type": "integer", "minimum": 1, "maximum": 4096}, "url_filter": {"type": "string", "maxLength": 256}, "payloads": B, "max_payload_bytes": {"type": "integer", "minimum": 1, "maximum": 4096}}, tuple(TAB))),
+        (f"{kind}_list", "Read bounded events with monotonic cursor and explicit gaps/history limitations.", schema({**TAB, "cursor": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 1000}}, tuple(TAB))),
+        (f"{kind}_stop", "Stop tab-local capture and detach listeners.", schema(TAB, tuple(TAB))),
+    ])
+
+
+def validate_arguments(command, arguments):
+    from jsonschema import Draft202012Validator
+    from .service import ServiceError
+    spec = next((spec for name, _, spec in TOOLS if name == command), None)
+    if spec is None:
+        raise ServiceError("unknown_command", f"Unknown command: {command}")
+    errors = list(Draft202012Validator(spec).iter_errors(arguments))
+    if errors:
+        error = errors[0]
+        location = ".".join(str(part) for part in error.absolute_path) or "arguments"
+        raise ServiceError("invalid_argument", f"Invalid {location}: expected {error.validator} constraint")
 
 
 def tool_result(result):
@@ -98,7 +121,15 @@ async def serve():
                 if params.get("name") not in {t[0] for t in TOOLS}:
                     raise ValueError("Unknown tool")
                 try:
-                    result = tool_result(await service.dispatch(params["name"], params.get("arguments", {})))
+                    token = params.get("_meta", {}).get("progressToken")
+                    valid_token = isinstance(token, (str, int, float)) and not isinstance(token, bool)
+                    progress = 0
+                    async def report(event):
+                        nonlocal progress
+                        if valid_token and not asyncio.current_task().cancelling():
+                            progress += 1
+                            send({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": token, "progress": progress, "message": json.dumps(event, ensure_ascii=False, separators=(",", ":"))}})
+                    result = tool_result(await service.dispatch(params["name"], params.get("arguments", {}), on_progress=report if valid_token else None))
                 except Exception as exc:
                     result = {"content": [{"type": "text", "text": json.dumps({"error": error_payload(exc)})}], "structuredContent": {"error": error_payload(exc)}, "isError": True}
             else:
