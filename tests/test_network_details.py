@@ -30,6 +30,7 @@ async def detail_site():
             if path == "/":
                 content_type = "text/html"
                 body = b'''<h1>Quiet fixture</h1><button id="go" onclick="fetch('/json?q=ordinary&token=query-private',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer fixture-private'},body:JSON.stringify({query:'query Item { item }',variables:{id:42,token:'body-private'}})});fetch('/form',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'item=ordinary&password=form-private'});fetch('/binary');fetch('/503');fetch('/redirect');fetch('http://127.0.0.1:1/fail').catch(()=>{});fetch('/stream').catch(()=>{})">Run</button>'''
+                body += b'''<button id="stream" onclick="fetch('/stream').catch(()=>{})">Stream</button><button id="binary" onclick="fetch('/binary')">Binary</button>'''
                 extra = "Set-Cookie: fixture_session=cookie-private; HttpOnly; Path=/\r\n"
             elif path == "/binary":
                 body, content_type = BINARY, "application/octet-stream"
@@ -165,3 +166,52 @@ def test_structured_redaction_and_byte_chunks():
     assert json.loads(safe_body(b'{"ordinary":42,"password":"private"}', "application/json"))["ordinary"] == 42
     chunks = [body_chunk("é".encode(), offset=n, limit=1) for n in range(2)]
     assert b"".join(base64.b64decode(c["data"]) for c in chunks) == "é".encode()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalidate", ["stop", "evict", "cancel"])
+async def test_real_concurrent_body_invalidation(monkeypatch, invalidate):
+    monkeypatch.setenv("BROWSER_NETWORK_BODY_TIMEOUT_MS", "10000")
+    async with detail_site() as url, await BrowserSession.launch(headless=True) as browser:
+        tab = (await browser.new_tab(url))["id"]
+        page = browser._page(tab)
+        monitor = TrafficMonitor()
+        pending = None
+        try:
+            await monitor.start(page, tab, max_events=1)
+            await page.click("#stream")
+            for _ in range(100):
+                events = monitor.list(tab, "network")["events"]
+                if any(e["event"] == "response" and e["url"].endswith("/stream") for e in events):
+                    break
+                await asyncio.sleep(.01)
+            else:
+                raise AssertionError("Streaming response did not arrive")
+            request_id = events[-1]["request_id"]
+            capture = monitor._captures[(tab, "network")]
+            pending = asyncio.create_task(monitor.request_body(tab, request_id))
+            for _ in range(100):
+                if capture.tasks:
+                    break
+                await asyncio.sleep(.01)
+            else:
+                raise AssertionError("Body read did not begin")
+            if invalidate == "stop":
+                await monitor.stop(tab, "network")
+                with pytest.raises(ValueError, match="capture_stopped"):
+                    await pending
+            elif invalidate == "evict":
+                await page.click("#binary")
+                with pytest.raises(ValueError, match="request_evicted"):
+                    await pending
+            else:
+                pending.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await pending
+                assert capture.active
+        finally:
+            if pending is not None and not pending.done():
+                pending.cancel()
+            await monitor.close()
+            if pending is not None:
+                await asyncio.gather(pending, return_exceptions=True)

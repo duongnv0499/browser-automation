@@ -400,7 +400,14 @@ class TrafficMonitor:
                     tasks.pop(part, None)
             task.add_done_callback(completed)
         task = tasks[part]
-        data = await asyncio.shield(task)
+        try:
+            data = await asyncio.shield(task)
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():
+                raise
+            reason = "capture_stopped" if not c.active else "request_evicted" if request_id not in c.records else "body_read_cancelled"
+            raise ValueError(f"{reason}: network body read invalidated") from None
         self._record(tab_id, request_id)
         status = dict(record["body_status"].get(part, {"unavailable_reason": "response_pending", "source_complete": False}))
         if data is not None:
@@ -410,6 +417,10 @@ class TrafficMonitor:
                 content_type = ""
                 status["unavailable_reason"] = status.get("unavailable_reason") or "content_type_unavailable"
             data = safe_body(data, content_type, include_sensitive)
+        self._record(tab_id, request_id)
+        if data is not None and (c.capture_id, request_id, part) not in self._body_cache:
+            data = None
+            status = dict(record["body_status"][part])
         return {"tab_id": tab_id, "request_id": request_id, "capture_id": c.capture_id, "part": part,
                 "privacy_note": PRIVACY_NOTE, "redaction_best_effort": not include_sensitive,
                 "export_total_bytes": len(data) if data is not None else None,
