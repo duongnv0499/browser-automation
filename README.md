@@ -7,7 +7,7 @@ Guarded browser control and a multimodal Luna Decisions agent for Python, Codex,
 - Revision-bound element observations with compatible operations, stale/covered-target checks, and real Playwright input—not model-generated selectors or JavaScript.
 - DOM text plus optional PNG screenshots, including visual-target observations for interfaces that cannot be described completely by HTML controls.
 - OpenRouter alpha Decisions as the primary provider, with a distinct OpenAI Decisions adapter. One typed choice selects a compatible operation/target pair; field text uses a separate structured-output call.
-- Persistent JSONL CLI and MCP stdio sessions; independent verification before a model-selected DONE counts as success.
+- Persistent JSONL CLI, default MCP stdio and optional authenticated Streamable HTTP; independent verification before a model-selected DONE counts as success.
 - Explicit native-profile consent, owned-tab lifecycle, and approval-bound consequential actions/file transfers.
 
 These are design capabilities, not claims of better performance than Jev or Codex. Supported surfaces, limitations, and verification evidence are documented below.
@@ -106,6 +106,20 @@ asyncio.run(main())
 
 For isolation use `await BrowserSession.launch(headless=False)` explicitly. See [architecture](docs/architecture.md) and [provider configuration](docs/providers.md).
 
+## Run MCP once, connect compatible agents
+
+On the **browser host**, install `uv sync --extra http`, securely configure `BROWSER_MCP_TOKEN`, then start:
+
+```sh
+uv run browser-agent-mcp --transport streamable-http --host 127.0.0.1 --port 8767
+```
+
+Compatible Streamable HTTP/bearer clients connect to `http://127.0.0.1:8767/mcp`, or a protected HTTPS endpoint/tunnel for remote clients. The browser stays on the server host; remote MCP is not remote CDP or automatic attachment to the client's Chrome. Native consent and host-bound action/file approvals are unchanged. Distinct principals need distinct configured tokens; sharing a bearer identity deliberately shares its modern-protocol browser scope.
+
+See [secure token generation, Codex/Claude configuration, SDK client and TLS proxy setup](docs/http.md). Default stdio and the existing OMP stdio bridge remain available; not every agent/product supports the required protocol/authentication. Provider API keys for Luna `run` are separate from MCP bearer credentials.
+
+An optional [professional portable skill](skills/browser-automation/SKILL.md) helps agents choose bounded goals, use Luna decision-first, retain session IDs, budget screenshots/context, pause for host approvals and independently verify outcomes. [Install/discovery instructions](docs/integrations.md#portable-professional-skill) cover Codex, Claude Code and Hermes. Skill installation is not required for tool access and grants no extra authority.
+
 ## Agent clients (MCP stdio)
 
 Use an absolute checkout path so client working directories do not matter. Browser-only tools need no API key. To expose native sessions to a client, set `BROWSER_NATIVE_CONSENT=1` in the trusted host/server environment **after reviewing the access**, then call `connect_default`. Approval records and file directories are host policy, not model-controlled parameters.
@@ -168,4 +182,4 @@ The library path above is this verification host's explicit browser dependency c
 
 Exact commands, artifact paths, checksums, measurements, and the pushed implementation commit ledger are in [research evidence](docs/research.md). No live Luna keys were available; no personal Chrome profile was attached or hijacked. Controlled attached-browser fixtures prove preservation of fixture tabs/cookies, not access to a user's logged-in profile. Headed-desktop behavior and matched Jev/Codex comparisons remain unverified.
 
-See [AGENTS.md](AGENTS.md), [worker instructions](agents/worker-instructions.md), [durable workstreams](agents/workstreams.json), and [changelog](CHANGELOG.md). Preserve the user's `doc.md`. Workers implement scoped features; the parent manages/reviews; Harness serializes feature commits and pushes.
+See [AGENTS.md](AGENTS.md), [worker instructions](agents/worker-instructions.md), [durable workstreams](agents/workstreams.json), and [changelog](CHANGELOG.md). Preserve the user's `doc.md`. Workers implement scoped features; the parent manages/reviews; the active GitOwner in workstreams serializes exact-path feature commits and pushes.

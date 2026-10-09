@@ -1,6 +1,6 @@
-# Local agent integrations
+# Agent integrations
 
-All transports retain browser state in one worker. No TCP control server is exposed. CDP endpoints must be loopback HTTP/WebSocket URLs; remote endpoints and URL credentials are rejected. Browser page contents and API keys are not written to routine logs. Observations are sensitive: the caller receives page content and optional screenshots, and autonomous runs send these to the selected model provider.
+Stdio/JSONL retain browser state in one persistent worker; authenticated [Streamable HTTP](http.md) additionally lets compatible agents connect to one server on the browser host. The existing OMP extension remains stdio/JSONL. CDP endpoints must be loopback HTTP/WebSocket URLs; remote endpoints and URL credentials are rejected. Browser page contents and API keys are not written to routine logs. Observations are sensitive: the caller receives page content and optional screenshots, and autonomous runs send these to the selected model provider.
 
 Browser tools navigate/read only HTTP(S) pages and `about:blank`. `file:`, `data:`, `javascript:`, and browser-internal pages are prohibited, including preexisting attached tabs: native attachment does not grant arbitrary local-file read access. Local file content enters the browser only through explicitly host-approved, directory-scoped uploads/downloads.
 
@@ -87,6 +87,30 @@ mcp_servers:
 ```
 
 Hermes explicitly controls the child environment; add the provider credential locally using its supported environment configuration, not into a repository. Native consent only authorizes attachment, not file access or purchases.
+
+## Portable professional skill
+
+The instruction-only `skills/browser-automation/SKILL.md` follows the Agent Skills standard. It recommends bounded Luna `run` goals rather than unnecessary step-by-step direct actions, preserves returned session IDs, distinguishes native/isolated browser choice, budgets page text/images, pauses for host-generated approvals, and requires independent completion evidence. It does not install tools or grant permissions. Tools work without it; clients may also consume server initialize instructions.
+
+Install only into your intended client scope; do not overwrite an existing same-name skill. From the checkout, these personal installations copy the self-contained skill directory (no external relative resources):
+
+```sh
+# Codex: ~/.agents/skills; project alternative .agents/skills
+mkdir -p "$HOME/.agents/skills"
+cp -R skills/browser-automation "$HOME/.agents/skills/browser-automation"
+# Claude Code: ~/.claude/skills; project alternative .claude/skills
+mkdir -p "$HOME/.claude/skills"
+cp -R skills/browser-automation "$HOME/.claude/skills/browser-automation"
+# Hermes: default profile's primary ~/.hermes/skills directory
+mkdir -p "$HOME/.hermes/skills"
+cp -R skills/browser-automation "$HOME/.hermes/skills/browser-automation"
+```
+
+Codex supports explicit `$browser-automation` and `/skills` discovery, plus implicit description matching. Claude Code supports `/browser-automation`; restart/reload if the skill does not appear and review workspace trust. Hermes documents `/browser-automation` and `skills_list`/`skill_view` progressive disclosure; named profiles may have different home directories. These are documented discovery contracts, not a claim that all three installed clients were exercised. MCP tool names can have client-specific prefixes; choose the discovered logical `run`/session tools rather than hardcoding a prefix.
+
+Example bounded prompt: “Use browser-automation. In my explicitly consented native session, read at most five relevant posts and return a shortlist plus reply drafts; do not post anything.” Facebook is only a read/draft workflow illustration, not an actual benchmark or permission for spam. Browser-only control needs no provider key; Luna `run` needs the server's Decisions credentials; HTTP bearer authentication uses a distinct MCP token. See [HTTP client connections](http.md) for Codex/Claude and generic SDK usage. OMP's existing extension does not gain HTTP support from installing this skill.
+
+Primary sources accessed 2026-10-09: [Agent Skills specification](https://agentskills.io/specification), [Codex skills](https://developers.openai.com/codex/skills), [Claude Code skills](https://code.claude.com/docs/en/skills), [Hermes skills](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills). Skill validation and actual client discovery evidence, when exercised, are recorded separately in [research](research.md).
 
 ## Host approval and local files
 

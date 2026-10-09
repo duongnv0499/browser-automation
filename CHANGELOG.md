@@ -2,6 +2,9 @@
 
 ## 0.1.0 — Unreleased
 
+- Add an instruction-only portable browser-automation skill for bounded decision-first Luna workflows, explicit browser choice, persistent IDs, context/privacy budgets, exact host approvals and independent rendered evidence; document current Codex/Claude/Hermes discovery without a mandatory-skill claim.
+- Document optional authenticated Streamable HTTP deployment on the browser host, current/legacy protocol boundaries, compatible Codex/Claude and SDK configuration, per-identity ownership, bounds and a TLS reverse-proxy recipe; preserve default stdio and the OMP stdio bridge.
+
 - Establish an async Python package, CLI/MCP entrypoints, reproducible uv dependencies, and guarded-browser project contracts.
 - Preserve native-profile consent, owned-tab lifecycle, independent completion verification, and feature-scoped Git ownership as durable working rules.
 - Add native Chrome opt-in discovery and explicit isolated launch, revision-bound DOM/screenshot observations, and real-input target guards.
