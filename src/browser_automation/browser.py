@@ -544,7 +544,7 @@ class BrowserSession:
                     continue
                 if data.get('source_truncated'):
                     source_truncated = True
-                for key in ('editable_nonempty', 'sensitive_fields'):
+                for key in ('editable_nonempty', 'sensitive_fields', 'unsaved'):
                     safety[key] |= data.get(key, False)
                 collected_text_nodes += data.get('rendered_text_nodes', 0)
                 if frame.parent_frame is None:

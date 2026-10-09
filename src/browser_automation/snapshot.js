@@ -72,11 +72,12 @@
     }
     return raw.length > 200 ? `${raw.slice(0, 100)}...len:${raw.length}:h:${fastHash(raw)}` : raw;
   };
-  state.fingerprint = el => JSON.stringify([el.tagName,el.type||el.getAttribute('type'),el.getAttribute('role'),label(el),fieldValue(el),el.href||'',el.form?.action||'',el.form?.method||'',el.getAttribute('formaction'),el.getAttribute('formmethod'),el.disabled,el.readOnly,el.multiple]);
+  state.fingerprint = el => JSON.stringify([el.tagName,el.type||el.getAttribute('type'),el.getAttribute('role'),label(el),fieldValue(el),el.href||'',el.form?.action||'',el.form?.method||'',el.getAttribute('formaction'),el.getAttribute('formmethod'),el.disabled,el.readOnly,el.multiple,el.checked]);
   const elements = [], text = [], live = new Map(), fields = [];
   const visibleAlerts = [];
   let visitedNodes = 0, textChars = 0, sourceTruncated = false, omittedElements = 0;
   let editableNonempty = false, sensitiveFields = false, renderedTextNodes = 0;
+  let unsaved = false;
   const walk = root => {
     if (visitedNodes >= maxNodes) { sourceTruncated = true; return; }
     for (const el of root.children || []) {
@@ -89,6 +90,13 @@
         (el.matches('input') && !['hidden','button','submit','reset','checkbox','radio','file','range','color','image'].includes(el.type));
       if (editable && !el.readOnly) editableNonempty ||= !!String(el.value || (el.isContentEditable ? el.textContent : '')).trim();
       sensitiveFields ||= sensitive(el);
+      if(el.matches('input[type="checkbox"],input[type="radio"]')) {
+        unsaved ||= !el.disabled || el.checked !== el.defaultChecked;
+      } else if(el.matches('select')) {
+        // Even default choices are mutable drafts; do not infer a clean form.
+        unsaved ||= !el.disabled;
+        if(el.disabled) for(const option of el.options) unsaved ||= option.selected !== option.defaultSelected;
+      }
       if (isVisible) {
         const tag = el.tagName.toLowerCase(), type = el.getAttribute('type') || '', role = el.getAttribute('role') || ({a:'link',button:'button',select:'combobox',textarea:'textbox',input:type==='checkbox'?'checkbox':type==='radio'?'radio':'textbox',canvas:'canvas'}[tag] || tag);
         if (['alert','status'].includes(role) && visibleAlerts.length < 8) {
@@ -122,6 +130,7 @@
               disabled: o.disabled || (o.parentElement.tagName === 'OPTGROUP' && o.parentElement.disabled)
             }));
             elements.push({id,signature:state.fingerprint(el),role,name:label(el),value:sensitive(el)?'[REDACTED]':String(el.value || '').slice(0,1000),operations:[...new Set(ops)],bounds:{x:r.x,y:r.y,width:r.width,height:r.height},sensitive:sensitive(el),input_type:tag==='button'?(el.type||'submit'):(el.type||type),is_submit:isSub,tag,href:el.href||null,form_action:el.hasAttribute('formaction')?el.formAction:el.form?.action||null,form_method:el.hasAttribute('formmethod')?el.formMethod:el.form?.method||null,multiple:tag==='select'?!!el.multiple:(tag==='input'&&type==='file')?!!el.multiple:false,options:opts,omitted_options:Math.max(0, rawOpts.length - maxOpts),selected_values:tag==='select'?Array.from(el.selectedOptions||[]).map(o=>o.value):undefined});
+            if(['checkbox','radio'].includes(type)) elements.at(-1).checked = !!el.checked;
           } else {
             omittedElements++;
             sourceTruncated = true;
@@ -154,5 +163,5 @@
   };
   walk(document);
   state.nodes = live;
-  return {document:state.token,elements,omitted_elements:omittedElements,fields,text:text.join('\n'),source_truncated:sourceTruncated,viewport:{width:innerWidth,height:innerHeight},url:location.href,title:document.title,ready_state:document.readyState,editable_nonempty:editableNonempty,sensitive_fields:sensitiveFields,visited_nodes:visitedNodes,rendered_text_nodes:renderedTextNodes,visible_alerts:visibleAlerts};
+  return {document:state.token,elements,omitted_elements:omittedElements,fields,text:text.join('\n'),source_truncated:sourceTruncated,viewport:{width:innerWidth,height:innerHeight},url:location.href,title:document.title,ready_state:document.readyState,editable_nonempty:editableNonempty,sensitive_fields:sensitiveFields,unsaved,visited_nodes:visitedNodes,rendered_text_nodes:renderedTextNodes,visible_alerts:visibleAlerts};
 }

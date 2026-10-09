@@ -3,7 +3,8 @@ import asyncio
 
 import pytest
 
-from browser_automation.browser import BrowserSession, ProtectedUrlError, UnsafeActionError
+from browser_automation.browser import BrowserSession, ProtectedUrlError, UnsafeActionError, StaleObservationError
+from browser_automation.page_state import reload_approval_reason
 
 
 @pytest.mark.asyncio
@@ -175,3 +176,56 @@ async def test_protected_frame_points_and_unbound_keyboard_rejected():
         allowed = next(e for e in observation['elements'] if e['name'] == 'Allowed parent')
         await browser.act(tab, {'operation': 'click', 'target': allowed['id'], 'observation_id': observation['id']})
         assert await page.get_attribute('body', 'data-clicked') == 'yes'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('kind', ['select', 'checkbox', 'radio'])
+@pytest.mark.parametrize('offscreen', [False, True])
+async def test_nontext_drafts_require_reload_approval_and_bind_revision(kind, offscreen):
+    controls = {
+        'select': '<select id="draft" aria-label="Draft"><option value="first" selected>First</option><option value="second">Second</option></select>',
+        'checkbox': '<input id="draft" type="checkbox" aria-label="Draft">',
+        'radio': '<input id="draft" type="radio" name="choice" aria-label="Draft">',
+    }
+    style = 'position:absolute;top:3000px' if offscreen else ''
+    body = ('<!doctype html><div role="alert">Something went wrong. Try again.</div>'
+            + f'<div style="{style}">{controls[kind]}</div><button>Continue</button>').encode()
+    async def handle(reader, writer):
+        try:
+            await reader.readuntil(b'\r\n\r\n')
+            writer.write(b'HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: ' + str(len(body)).encode() + b'\r\nConnection: close\r\n\r\n' + body)
+            await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+    server = await asyncio.start_server(handle, '127.0.0.1', 0)
+    try:
+        async with await BrowserSession.launch(headless=True) as browser:
+            origin = f'http://127.0.0.1:{server.sockets[0].getsockname()[1]}'
+            tab = (await browser.new_tab(origin))['id']
+            page = browser._page(tab)
+            policy = {'reload_without_approval_origins': [origin]}
+            original = await browser.observe(tab)
+            assert original['coverage']['status'] == 'complete'
+            assert original['page_state']['state'] == 'error'
+            assert original['safety']['editable_nonempty'] is False
+            assert original['safety']['unsaved'] is True
+            assert 'unsaved' in reload_approval_reason(original, policy)
+            if kind == 'select':
+                await page.evaluate("document.querySelector('#draft').value='second'")
+            else:
+                await page.evaluate("document.querySelector('#draft').checked=true")
+            with pytest.raises(StaleObservationError):
+                await browser.act(tab, {'operation': 'wait', 'seconds': 0, 'observation_id': original['id']})
+            changed = await browser.observe(tab)
+            assert changed['safety']['unsaved'] is True
+            assert 'unsaved' in reload_approval_reason(changed, policy)
+            if not offscreen:
+                draft = next(e for e in changed['elements'] if e['name'] == 'Draft')
+                if kind == 'select':
+                    assert draft['selected_values'] == ['second']
+                else:
+                    assert draft['checked'] is True
+    finally:
+        server.close()
+        await server.wait_closed()
