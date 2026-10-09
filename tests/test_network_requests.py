@@ -263,3 +263,70 @@ async def test_approved_same_origin_redirect_does_not_authorize_new_risky_path()
         result = await browser.network_execute(plan['plan_id'], approved=True)
         assert result['diagnostic']['code'] == 'redirect_reapproval_required'
         assert not any(r['path'] == '/delete' for r in seen)
+
+
+@pytest.mark.asyncio
+async def test_replay_encoding_changes_replace_inherited_content_type():
+    from urllib.parse import parse_qs
+    async with api_site() as (url, seen, _), await BrowserSession.launch(headless=True) as browser:
+        tab = (await browser.new_tab(url))['id']
+        await browser.monitor_start(tab, 'network')
+        await browser._page(tab).click('#send')
+        source_json = await captured_post(browser, tab)
+        plan = await browser.network_replay(tab, source_json, form={'value': 'edited form'})
+        await browser.network_execute(plan['plan_id'], approved=True)
+        assert seen[-1]['headers']['content-type'] == 'application/x-www-form-urlencoded'
+        assert parse_qs(seen[-1]['body']) == {'value': ['edited form']}
+        form_tab = (await browser.new_tab(url))['id']
+        await browser.monitor_start(form_tab, 'network')
+        await browser._page(form_tab).evaluate("fetch('/echo',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'value=original+form'})")
+        source_form = await captured_post(browser, form_tab)
+        plan = await browser.network_replay(form_tab, source_form, json_body={'value': 'edited json'})
+        await browser.network_execute(plan['plan_id'], approved=True)
+        assert seen[-1]['headers']['content-type'] == 'application/json'
+        assert json.loads(seen[-1]['body']) == {'value': 'edited json'}
+        plan = await browser.network_replay(tab, source_json, form={'value': 'explicit'}, headers={'CONTENT-TYPE': 'application/custom'})
+        await browser.network_execute(plan['plan_id'], approved=True)
+        assert seen[-1]['headers']['content-type'] == 'application/custom'
+        plan = await browser.network_replay(tab, source_json, body=None)
+        await browser.network_execute(plan['plan_id'], approved=True)
+        assert seen[-1]['body'] == ''
+
+
+@pytest.mark.asyncio
+async def test_prefixed_credentials_foreign_replay_and_explicit_read_approval():
+    async with api_site() as (a, seen_a, _), api_site() as (b, seen_b, _), await BrowserSession.launch(headless=True) as browser:
+        tab = (await browser.new_tab(a))['id']
+        await browser.monitor_start(tab, 'network')
+        await browser._page(tab).evaluate("fetch('/echo',{method:'POST',headers:{'X-Authorization':'fixture-auth','X-Cookie':'fixture-cookie'},body:'original'})")
+        source = await captured_post(browser, tab)
+        plan = await browser.network_replay(tab, source, url=b + '/echo')
+        assert plan['approval_required'] and not seen_b
+        await browser.network_execute(plan['plan_id'], approved=True)
+        assert 'x-authorization' not in seen_b[-1]['headers']
+        assert 'x-cookie' not in seen_b[-1]['headers']
+        before = len(seen_a)
+        plan = await browser.network_call(tab, url=a + '/echo', headers={'X-Authorization': 'fixture-auth', 'X-Cookie': 'fixture-cookie'})
+        assert plan['approval_required']
+        assert len(seen_a) == before
+        assert 'fixture-auth' not in json.dumps(plan)
+        assert 'fixture-cookie' not in json.dumps(plan)
+
+
+@pytest.mark.asyncio
+async def test_bounded_sanitized_approval_preview_and_actual_wire_semantics(tmp_path):
+    async with api_site() as (url, seen, _), await BrowserSession.launch(headless=True) as browser:
+        tab = (await browser.new_tab(url))['id']
+        payload = {'operation': 'edit fixture', 'value': 7, 'token': 'fixture-sensitive', 'ordinary': 'x' * 4000}
+        before = len(seen)
+        plan = await browser.network_call(tab, url=url + '/echo', method='POST', json_body=payload, headers={'X-CSRF-Token': 'fixture-sensitive'})
+        binding = (await browser.network_plan(plan['plan_id']))['binding']
+        preview = binding['body_preview']
+        assert 'edit fixture' in preview['data'] and '"value":7' in preview['data']
+        assert preview['truncated'] and not preview['source_complete']
+        assert len(preview['data'].encode()) <= 2048
+        assert 'fixture-sensitive' not in json.dumps(binding)
+        assert len(seen) == before
+        result = await browser.network_execute(plan['plan_id'], approved=True)
+        assert json.loads(seen[-1]['body']) == payload
+        (tmp_path / 'approval-preview-proof.json').write_text(json.dumps({'binding': binding, 'actual_response_status': result['status'], 'wire_payload_matches_approved_raw_spec': json.loads(seen[-1]['body']) == payload}, indent=2))

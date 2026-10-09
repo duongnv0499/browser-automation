@@ -90,7 +90,7 @@ async def test_native_disconnect_preserves_preexisting_tabs(tmp_path):
         library = os.environ.get('BROWSER_AGENT_LIBRARY_PATH')
         if library:
             env['LD_LIBRARY_PATH'] = library + ':' + env.get('LD_LIBRARY_PATH', '')
-        fixture = await playwright.chromium.launch(headless=True, args=['--remote-debugging-port=0'], env=env)
+        fixture = await playwright.chromium.launch(headless=True, args=['--remote-debugging-port=0', '--enable-automation'], env=env)
         try:
             context = await fixture.new_context()
             page = await context.new_page()

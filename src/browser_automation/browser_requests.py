@@ -17,11 +17,10 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
-from .browser_network_data import PRIVACY_NOTE, body_chunk, safe_body, safe_headers, safe_url, sensitive_allowed
+from .browser_network_data import PRIVACY_NOTE, body_chunk, is_sensitive_header, safe_body, safe_headers, safe_url, sensitive_allowed
 
 _TOKEN = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 _RISK = re.compile(r"buy|pay|purchase|checkout|order|delete|remove|send|submit|publish|post|transfer|confirm|accept|authorize|sign.?in|log.?in|log.?out|upload|download|subscribe|unsubscribe", re.I)
-_CREDENTIAL = re.compile(r"authorization|cookie|proxy-authorization|.*(?:token|secret|csrf|api[-_]?key|session|credential).*", re.I)
 _TRANSPORT = {'host', 'content-length', 'connection', 'transfer-encoding'}
 
 
@@ -103,7 +102,7 @@ class RequestExecutor:
                 lower = name.lower()
                 if lower in _TRANSPORT or lower == 'cookie':
                     continue
-                if _CREDENTIAL.fullmatch(lower) and (origin(original_url) != origin(url) or source_context is not page.context):
+                if is_sensitive_header(lower) and (origin(original_url) != origin(url) or source_context is not page.context):
                     continue
                 duplicates |= lower in headers
                 headers[lower] = (name, value)
@@ -121,17 +120,20 @@ class RequestExecutor:
         if len(bodies) > 1:
             raise ValueError('body, json_body, form and body_base64 are mutually exclusive')
         body = source['body'] if source else None
+        explicit_content_type = overrides is not None and any(name.lower() == 'content-type' for name in overrides)
         if bodies:
             key = bodies[0]
             value = spec[key]
             if key == 'json_body':
                 body = json.dumps(value, ensure_ascii=False, separators=(',', ':'), allow_nan=False).encode()
-                headers.setdefault('content-type', ('Content-Type', 'application/json'))
+                if not explicit_content_type:
+                    headers['content-type'] = ('Content-Type', 'application/json')
             elif key == 'form':
                 if not isinstance(value, dict):
                     raise ValueError('form must be an object')
                 body = urlencode(value, doseq=True).encode()
-                headers.setdefault('content-type', ('Content-Type', 'application/x-www-form-urlencoded'))
+                if not explicit_content_type:
+                    headers['content-type'] = ('Content-Type', 'application/x-www-form-urlencoded')
             elif key == 'body_base64':
                 body = base64.b64decode(value, validate=True)
             elif value is None:
@@ -161,7 +163,7 @@ class RequestExecutor:
             reasons.append('Destination differs from target tab origin')
         if body is not None:
             reasons.append('Request includes a body')
-        if overrides and any(_CREDENTIAL.fullmatch(name) for name in overrides):
+        if overrides and any(is_sensitive_header(name) for name in overrides):
             reasons.append('Explicit credential header modification')
         if _RISK.search(urlsplit(url).path + '?' + urlsplit(url).query):
             reasons.append('URL names suggest a consequential action')
@@ -174,10 +176,18 @@ class RequestExecutor:
         plan_id = 'plan' + uuid.uuid4().hex
         source_binding = (source['tab_id'], source['request_id'], source['capture_id']) if source else None
         binding = {'plan_id': plan_id, 'target_tab_id': tab_id, 'target_page_url': safe_url(page.url), 'context_id': str(id(page.context)), 'url': safe_url(url), 'method': method, 'body_sha256': hashlib.sha256(body).hexdigest() if body is not None else None, 'headers_sha256': hashlib.sha256(json.dumps(list(headers.values())).encode()).hexdigest(), 'timeout_ms': timeout, 'max_redirects': redirects, 'source': list(source_binding) if source_binding else None}
+        content_type = headers.get('content-type', ('', ''))[1]
+        filtered_body = safe_body(body, content_type) if body is not None else None
+        preview_bytes = len(filtered_body) if filtered_body is not None else 0
+        binding['body_preview'] = {**body_chunk(filtered_body, limit=2048, total_bytes=len(body) if body is not None else 0, truncated=preview_bytes > 2048, source_complete=preview_bytes <= 2048), 'export_total_bytes': preview_bytes, 'redaction_best_effort': True}
+        filtered_headers = safe_headers([{'name': name, 'value': value} for name, value in headers.values()])
+        binding['headers_preview'] = [{'name': header['name'][:128], 'value': header['value'][:512], 'truncated': len(header['name']) > 128 or len(header['value']) > 512} for header in filtered_headers[:32]]
+        binding['headers_preview_truncated'] = len(filtered_headers) > 32
+        binding['privacy_note'] = PRIVACY_NOTE
         # Raw URL participates in the hash, never appears in a default model preview.
         digest = hashlib.sha256(json.dumps({**binding, 'raw_url': url, 'raw_page_url': page.url}, sort_keys=True).encode()).hexdigest()
         binding['plan_hash'] = digest
-        preview = {'status': 'approval_required' if reasons else 'prepared', 'plan_id': plan_id, 'plan_hash': digest, 'binding': binding, 'expires_at': now + 300, 'approval_required': bool(reasons), 'approval_reason': '; '.join(reasons) or 'Same-origin HTTP safe method; servers can violate safe-method semantics', 'request': {'url': safe_url(url), 'method': method, 'headers': safe_headers([{'name': n, 'value': v} for n, v in headers.values()]), 'body_bytes': len(body) if body is not None else 0}, 'limitations': ['API requests do not render the DOM', 'Duplicate original request headers collapsed to their last value'] if duplicates else ['API requests do not render the DOM']}
+        preview = {'status': 'approval_required' if reasons else 'prepared', 'plan_id': plan_id, 'plan_hash': digest, 'binding': binding, 'expires_at': now + 300, 'approval_required': bool(reasons), 'approval_reason': '; '.join(reasons) or 'Same-origin HTTP safe method; servers can violate safe-method semantics', 'request': {'url': safe_url(url), 'method': method, 'headers': binding['headers_preview'], 'headers_truncated': binding['headers_preview_truncated'], 'body_bytes': len(body) if body is not None else 0}, 'limitations': ['API requests do not render the DOM', 'Duplicate original request headers collapsed to their last value'] if duplicates else ['API requests do not render the DOM']}
         self._plans[plan_id] = Plan(plan_id, tab_id, page.context, page.url, url, method, tuple(headers.values()), body, timeout, redirects, now + 300, source_binding, json.dumps(preview))
         return preview
 
