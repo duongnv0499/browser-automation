@@ -1,6 +1,6 @@
 {
   "worker": "HttpTransport",
-  "phase": "READY for parent-authorized coordinated verification; no tests or smoke runs executed",
+  "phase": "Authorized HTTP verification complete; all 4 security and 10 real-browser HTTP cases exercised successfully after test-fixture repairs; existing stdio slice 5 passed",
   "ownership": ["src/browser_automation/mcp_http.py", "src/browser_automation/mcp.py", "src/browser_automation/cli.py", "pyproject.toml", "uv.lock", ".env.example", "tests/test_mcp_http.py", "tests/test_mcp_http_browser.py", "agents/http.json"],
   "contract": {
     "commands": "browser-agent-mcp --transport streamable-http --host 127.0.0.1 --port 8767; browser-agent mcp forwards the same transport parser; stdio remains default",
@@ -22,8 +22,18 @@
     {"url": "https://raw.githubusercontent.com/modelcontextprotocol/python-sdk/main/src/mcp/server/auth/middleware/bearer_auth.py", "accessed": "2026-10-09", "finding": "Public AuthenticatedUser(AccessToken) identity passed to SDK session manager"}
   ],
   "environment_operations": ["uv sync --extra http resolved lock and installed optional dependencies; installation implicitly built editable project, not a verification build", "Installed SDK signature/source introspection only"],
-  "checks_run": [],
-  "authorized_checks_needed": ["HTTP security ASGI tests", "BROWSER_INTEGRATION_TESTS=1 actual uvicorn/official SDK/Chromium HTTP tests", "existing stdio/CLI tests", "whole coordinated pytest suite", "build/package skill inclusion verification"],
+  "checks_run": [
+    "uv run --extra http pytest -q tests/test_mcp_http.py: 4 passed in2.34s",
+    "Initial actual HTTP+stdio run: 6 HTTP fixture failures (uvicorn graceful SIGTERM returns-15 rather than0), existing stdio5 passed in42.22s; browser/DOM/lifecycle assertions reached cleanup",
+    "After correct shutdown signal+lifecycle evidence fixture and expanded cases: HTTP9 passed, reverse proxy1 failed (relay only rewrote first keepalive Host); 41.11s",
+    "After relay Connection:close repair: actual localhost proxy case1 passed in5.53s",
+    "After negotiated-protocol assertions/evidence added: actual modern+legacy guarded browser and proxy3 passed in12.96s",
+    "After same-token legacy isolation assertion added: legacy guarded browser case1 passed in5.87s"
+  ],
+  "verified_behavior": ["Modern2026-07-28 and legacy2025-11-25 actual official SDK clients+uvicorn", "Rendered fill Name Ada and click Rendered HTTP SUCCESS with separate changed PNG image blocks", "Missing/wrong credentials401; Origin403; Host421; spoofed forwarded Host rejected; body413; invalid version400", "Different principal browser ids/sessions inaccessible; same-token distinct legacy sessions isolated; cross-principal legacy DELETE404 leaves owner intact", "Modern client disconnect preserves same-principal state; actual SSE disconnect cancellation releases browser lock", "Legacy explicit notifications/cancelled202 releases browser lock; modern+legacy idle TTL does not expire active1second wait", "Legacy DELETE/expiry and server shutdown preserve disposable CDP original browser/tab and close service-owned tabs", "Actual two HTTP socket hops proxy relay to uvicorn with SDK auto2026-07-28 doctor/launch/observe screenshot; no TLS claim"],
+  "evidence": {"modern": "/tmp/browser-http-protocol/test_official_client_browser_i0/http-2026-07-28-evidence.json plus before/after PNGs", "legacy": "/tmp/browser-http-legacy-isolation/test_official_client_browser_i0/http-legacy-evidence.json plus before/after PNGs", "proxy": "/tmp/browser-http-protocol/test_actual_localhost_reverse_0/reverse-proxy-evidence.json plus reverse-proxy-browser.png", "boundary": "Machine-local temporary controlled public fixtures; no provider keys/page secrets/private profile data recorded"},
+  "authorized_checks_needed": ["Parent final coordinated whole-suite gate", "Parent build/package skill inclusion verification"],
   "limitations": ["No live Luna credentials/inference exercised", "No TLS/nginx deployment exercised", "No host logged-in profile or native consent dialog exercised; disposable genuine CDP Chrome fixture only"],
-  "git_owner": "DocsSkill: exact owned paths only; feature milestone commit/push serialized; no git commands by HTTP worker"
+  "git_owner": "DocsSkill: exact owned paths only; feature milestone commit/push serialized; no git commands by HTTP worker",
+  "feature_commit": "25e4095db09e87d5b52d03880f78057a6b18dd41 pushed origin/main by DocsSkill; test/evidence repair milestone requested separately"
 }
