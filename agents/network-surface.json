@@ -1,6 +1,6 @@
 {
   "owner": "AgentSurface",
-  "phase": "READY for parent coordinated verification",
+  "phase": "Scoped verification PASS; READY for parent full-suite gate",
   "owned_paths": ["src/browser_automation/service.py", "src/browser_automation/mcp.py", "src/browser_automation/mcp_http.py", "src/browser_automation/cli.py", "integrations/omp/browser-tools.mjs", "pyproject.toml", "uv.lock", ".env.example", "tests/test_network_surface.py", "tests/test_service_omp.py", "agents/network-surface.json"],
   "contracts": {
     "catalog": "29 tools: prior21 plus network_start_many,list_many,stop_many,detail,body,call,replay,execute",
@@ -9,10 +9,13 @@
     "transport": "stdio, JSONL CLI, modern and legacy authenticated HTTP reuse shared TOOLS validation and BrowserService; OMP commands updated.",
     "body": "Host limits BROWSER_NETWORK_BODY_LIMIT, BROWSER_NETWORK_CACHE_LIMIT, BROWSER_NETWORK_BODY_TIMEOUT_MS. Body chunks expose source/export byte totals and explicit loss."
   },
-  "verification": "Not run: workers barred from mid-flight checks. Parent runs coordinated checks after all READY.",
+  "verification": "Parent-authorized real-browser scoped run: network_surface.py/service_omp.py/service.py/agent_surface.py: 43 passed in 60.48s. After adding genuine request-response comparison and independent sanitized artifacts/screenshots, modified network_surface.py: 9 passed in 32.66s. After engine host-review preview addition, added semantic body/header preview assertions and reran four public workflow cases: 4 passed, 5 deselected in 35.51s. All used BROWSER_INTEGRATION_TESTS=1 and explicit Chromium library directory with uv run --extra http pytest.",
   "new_acceptance_consumers": "Official SDK stdio/modern+legacy HTTP and CLI: genuine two-tab+popup capture, query/header/body redaction and host-sensitive disclosure, binary chunks, browser cookies and SetCookie updates, exact same-origin POST replay into second tab, foreign-origin credential stripping, expired/wrong/one-use host tokens, no send before approval, HTTP503 single request, capture restart rejection, principal isolation. OMP real extension worker cookie/binary/two-tab/approval consumer plus installed OMP loader catalog description.",
   "intentionally_unchanged": "mcp_http.py and cli.py already dynamically consume shared catalog/BrowserService; pyproject.toml and uv.lock need no new dependency. Documentation owned by NetworkDocs.",
   "parent_checks": "BROWSER_INTEGRATION_TESTS=1 uv run --extra http pytest tests/test_network_surface.py tests/test_service_omp.py tests/test_agent_surface.py tests/test_service.py tests/test_mcp_http.py tests/test_mcp_http_browser.py; full-suite/build only coordinated by parent.",
+  "artifact_directory": "/tmp/browser-network-surface-evidence",
+  "latest_workflow_artifact_directory": "/tmp/browser-network-surface-preview-evidence",
+  "artifact_contents": "Four public-transport independent PNG screenshots, four sanitized local-server groundtruth JSON summaries, and four foreign-origin consent/disclosure summaries. Contains fixture data only, not Git artifacts. No live model or personal profile claims.",
   "research": ["https://playwright.dev/python/docs/api/class-apirequestcontext", "https://developer.mozilla.org/en-US/docs/Glossary/Safe/HTTP"],
   "research_access_date": "2026-10-09"
 }

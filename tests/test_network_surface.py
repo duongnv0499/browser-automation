@@ -102,7 +102,12 @@ async def public_transport(transport):
         async with connection() as (client, url):
             async def call(name, args):
                 result = await client.call_tool(name, args)
-                return result.structured_content
+                data = dict(result.structured_content)
+                if name == "observe" and args.get("screenshot"):
+                    image = next((block.data for block in result.content if block.type == "image"), None)
+                    if image:
+                        data["screenshot"] = image
+                return data
             assert NETWORK_TOOLS <= {tool.name for tool in (await client.list_tools()).tools}
             yield call, url
 
@@ -172,12 +177,19 @@ async def test_real_network_public_workflow(transport, monkeypatch, tmp_path):
         paused = await successful(call, "network_replay", {**args, "request_id": request_id, "target_tab_id": second, "json_body": {"ordinary": "edited"}})
         assert paused["status"] == "approval_required" and len(seen) == before
         assert "fixture-private" not in json.dumps(paused)
+        preview = paused["binding"]["body_preview"]
+        assert json.loads(preview["data"]) == {"ordinary": "edited"}
+        assert preview["encoding"] == "utf-8" and preview["total_bytes"] > 0
+        assert paused["binding"]["headers_preview"]
+        assert "private-cookie" not in json.dumps(paused["binding"])
         execute = {"session_id": sid, "plan_id": paused["plan_id"], "approval_token": "host-exact"}
         rejected = await call("network_execute", execute)
         assert rejected["error"]["code"] == "approval_required" and len(seen) == before
         approvals.write_text(json.dumps([{"token": "host-exact", "binding": paused["binding"], "expires_at": time.time() + 60}]))
         replayed = await successful(call, "network_execute", execute)
         assert replayed["provenance"] == "browser_context_api_request"
+        replay_body = await successful(call, "network_body", {"session_id": sid, "tab_id": second, "request_id": replayed["request_id"], "limit": 1024})
+        assert "response-visible" in replay_body["data"] and "fixture-private-response" not in replay_body["data"]
         assert len(seen) == before + 1
         sent = seen[-1]
         assert sent["method"] == "POST" and json.loads(sent["body"]) == {"ordinary": "edited"}
@@ -214,6 +226,21 @@ async def test_real_network_public_workflow(transport, monkeypatch, tmp_path):
                 assert forbidden.is_error and forbidden.structured_content["error"]["code"] == "unknown_session"
         await successful(call, "network_list_many", {"session_id": sid})
         await successful(call, "network_stop_many", {"session_id": sid})
+        visible = await successful(call, "observe", {**args, "screenshot": True})
+        assert "Quiet UI" in visible["text"], "API response does not render a fabricated UI outcome"
+        (tmp_path / f"network-{transport}-independent.png").write_bytes(base64.b64decode(visible["screenshot"]))
+        (tmp_path / f"network-{transport}-groundtruth.json").write_text(json.dumps({
+            "transport": transport, "catalog_tools": 29, "capture_id": events["capture_id"],
+            "request_id": request_id, "captured_tab_ids": [capture["tab_id"] for capture in many["captures"]],
+            "captured_ordinary_query_present": "visible" in exported,
+            "default_private_fields_absent": "fixture-private" not in exported,
+            "response_total_bytes": chunk["total_bytes"], "next_offset": chunk["next_offset"],
+            "edited_replay_method": sent["method"], "edited_replay_body": json.loads(sent["body"]),
+            "replay_response_provenance": replayed["provenance"], "api_response_text": replay_body["data"],
+            "safe_read_http_status": safe["status"], "binary_bytes": len(base64.b64decode(data["data"])),
+            "server_observed_requests": [{"method": item["method"], "path": urlsplit(item["target"]).path, "body_bytes": len(item["body"])} for item in seen],
+            "capture_restart_replay_error": expired["error"]["code"], "rendered_heading": "Quiet UI",
+        }, indent=2))
         await successful(call, "close", {"session_id": sid})
 
 
@@ -261,4 +288,12 @@ async def test_sensitive_host_policy_and_foreign_approval(transport, monkeypatch
         assert len(foreign_seen) == 1 and foreign_seen[0]["body"] == b"approved body"
         assert "authorization" not in foreign_seen[0]["headers"]
         assert "x-csrf-token" not in foreign_seen[0]["headers"]
+        (tmp_path / f"network-{transport}-foreign-groundtruth.json").write_text(json.dumps({
+            "transport": transport, "sensitive_query_visible_with_host_policy": "fixture-private-query" in json.dumps(exposed),
+            "sensitive_request_body_visible_with_host_policy": "fixture-private-body" in body["data"],
+            "expired_host_token_error": denied["error"]["code"], "foreign_requests_after_approval": len(foreign_seen),
+            "foreign_method": foreign_seen[0]["method"], "foreign_body": foreign_seen[0]["body"].decode(),
+            "captured_authorization_forwarded": "authorization" in foreign_seen[0]["headers"],
+            "captured_csrf_forwarded": "x-csrf-token" in foreign_seen[0]["headers"],
+        }, indent=2))
         await successful(call, "close", {"session_id": sid})
