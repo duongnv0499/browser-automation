@@ -24,11 +24,11 @@ def sensitive_allowed(include_sensitive: bool) -> bool:
     return include_sensitive
 
 
-def safe_url(url: str, include_sensitive: bool = False) -> str:
+def safe_url(url: str, include_sensitive: bool = False, *, allow_relative: bool = False) -> str:
     sensitive_allowed(include_sensitive)
     try:
         parts = urlsplit(url)
-        if parts.scheme.lower() not in {"http", "https", "ws", "wss"}:
+        if parts.scheme.lower() not in {"http", "https", "ws", "wss"} and not (allow_relative and not parts.scheme):
             return "[unsupported-scheme]"
         host = parts.hostname or ""
         if ":" in host:
@@ -53,7 +53,7 @@ def safe_headers(headers, include_sensitive: bool = False) -> list[dict]:
             if is_sensitive_header(name):
                 value = "[redacted]"
             elif name.lower() in {"location", "referer", "referrer"}:
-                value = safe_url(value)
+                value = safe_url(value, allow_relative=name.lower() == "location")
         result.append({"name": name, "value": value})
     return result
 

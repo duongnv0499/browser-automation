@@ -18,6 +18,7 @@ BINARY = bytes(range(256)) * 1024
 async def detail_site():
     tasks, writers = set(), set()
     release_streams = asyncio.Event()
+    calls = {}
 
     async def serve(reader, writer):
         tasks.add(asyncio.current_task())
@@ -26,18 +27,22 @@ async def detail_site():
             raw = await reader.readuntil(b"\r\n\r\n")
             lines = raw.decode().split("\r\n")
             path = lines[0].split()[1].split("?", 1)[0]
+            calls[path] = calls.get(path, 0) + 1
             headers = dict((k.lower(), v.strip()) for line in lines[1:] if ":" in line for k, v in [line.split(":", 1)])
             payload = await reader.readexactly(int(headers.get("content-length", "0")))
             status, extra, content_type = "200 OK", "", "application/json"
             if path == "/":
                 content_type = "text/html"
                 body = b'''<h1>Quiet fixture</h1><button id="go" onclick="fetch('/json?q=ordinary&token=query-private',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer fixture-private'},body:JSON.stringify({query:'query Item { item }',variables:{id:42,token:'body-private'}})});fetch('/form',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'item=ordinary&password=form-private'});fetch('/binary');fetch('/503');fetch('/redirect');fetch('http://127.0.0.1:1/fail').catch(()=>{});fetch('/stream').catch(()=>{})">Run</button>'''
-                body += b'''<button id="stream" onclick="fetch('/stream').catch(()=>{})">Stream</button><button id="binary" onclick="fetch('/binary')">Binary</button>'''
+                body += b'''<button id="stream" onclick="fetch('/stream').catch(()=>{})">Stream</button><button id="binary" onclick="fetch('/binary')">Binary</button><button id="absolute" onclick="fetch('/absolute-redirect')">Absolute redirect</button>'''
                 extra = "Set-Cookie: fixture_session=cookie-private; HttpOnly; Path=/\r\n"
             elif path == "/binary":
                 body, content_type = BINARY, "application/octet-stream"
             elif path == "/redirect":
-                body, status, extra = b"", "302 Found", "Location: /503\r\n"
+                body, status, extra = b"", "302 Found", "Location: /503?ordinary=visible&token=redirect-private\r\n"
+            elif path == "/absolute-redirect":
+                destination = f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}/503?ordinary=visible&token=absolute-private"
+                body, status, extra = b"", "302 Found", f"Location: {destination}\r\n"
             elif path == "/stream":
                 writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\ndata: waiting\n\n")
                 await writer.drain()
@@ -60,7 +65,7 @@ async def detail_site():
 
     server = await asyncio.start_server(serve, "127.0.0.1", 0)
     try:
-        yield f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}", release_streams
+        yield f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}", release_streams, calls
     finally:
         release_streams.set()
         server.close()
@@ -86,7 +91,7 @@ async def test_real_details_two_tabs_raw_replay_and_generation(monkeypatch, tmp_
     monkeypatch.setenv("BROWSER_NETWORK_BODY_TIMEOUT_MS", "10000")
     monkeypatch.delenv("BROWSER_NETWORK_SENSITIVE", raising=False)
     async with detail_site() as site, await BrowserSession.launch(headless=True) as browser:
-        url, release_streams = site
+        url, release_streams, calls = site
         tabs = [(await browser.new_tab(url))["id"] for _ in range(2)]
         monitor = TrafficMonitor()
         try:
@@ -129,10 +134,22 @@ async def test_real_details_two_tabs_raw_replay_and_generation(monkeypatch, tmp_
             assert chunk["total_bytes"] == len(BINARY) and chunk["source_complete"]
             assert (await monitor.request_detail(tab, ids["503"], fields=["status"]))["status"] == 503
             assert (await monitor.request_body(tab, ids["redirect"]))["unavailable_reason"] == "redirect_body_unavailable"
+            relative = await monitor.request_detail(tab, ids["redirect"], fields=["response_headers"])
+            relative_location = next(h["value"] for h in relative["response_headers"] if h["name"].lower() == "location")
+            assert relative_location.startswith("/503?") and "ordinary=visible" in relative_location
+            assert "redirect-private" not in relative_location and "%5Bredacted%5D" in relative_location
+            async with browser._page(tab).expect_response(lambda response: response.url.endswith("/absolute-redirect")):
+                await browser._page(tab).click("#absolute")
+            absolute_id = next(e["request_id"] for e in monitor.list(tab, "network", limit=1000)["events"] if e["url"].endswith("/absolute-redirect"))
+            absolute = await monitor.request_detail(tab, absolute_id, fields=["response_headers"])
+            absolute_location = next(h["value"] for h in absolute["response_headers"] if h["name"].lower() == "location")
+            assert absolute_location.startswith(url + "/503?") and "ordinary=visible" in absolute_location
+            assert "absolute-private" not in absolute_location and "%5Bredacted%5D" in absolute_location
             assert (await monitor.request_body(tab, ids["fail"]))["unavailable_reason"] == "no_response"
             monitor.body_timeout_ms = 150
             assert (await monitor.request_body(tab, ids["stream"]))["unavailable_reason"] == "timeout"
             proof = {"detail": detail, "request_body": body, "form_body": form,
+                     "relative_redirect": relative, "absolute_redirect": absolute,
                      "binary_sha256": hashlib.sha256(result).hexdigest(), "binary_total_bytes": len(result),
                      "tab_capture_ids": [monitor.list(t, "network")["capture_id"] for t in tabs],
                      "events": [monitor.list(t, "network", limit=1000) for t in tabs]}
@@ -157,7 +174,7 @@ async def test_real_body_limit_and_eviction(monkeypatch):
     monkeypatch.setenv("BROWSER_NETWORK_BODY_LIMIT", "64")
     monkeypatch.setenv("BROWSER_NETWORK_CACHE_LIMIT", "64")
     async with detail_site() as site, await BrowserSession.launch(headless=True) as browser:
-        url, release_streams = site
+        url, release_streams, calls = site
         tab = (await browser.new_tab(url))["id"]
         monitor = TrafficMonitor()
         try:
@@ -168,8 +185,13 @@ async def test_real_body_limit_and_eviction(monkeypatch):
             assert binary["retained_bytes"] == 64 and binary["total_bytes"] == len(BINARY)
             assert binary["truncated"] and binary["unavailable_reason"] == "body_limit"
             await monitor.request_body(tab, ids["503"])
-            evicted = await monitor.request_body(tab, ids["binary"])
-            assert evicted["data"] is None and evicted["unavailable_reason"] == "body_evicted"
+            record = monitor._captures[(tab, "network")].records[ids["binary"]]
+            assert record["body_status"]["response"]["unavailable_reason"] == "body_evicted"
+            assert not any(key[1] == ids["binary"] for key in monitor._body_cache)
+            recovered = await monitor.request_body(tab, ids["binary"])
+            assert recovered["data"] is not None and recovered["unavailable_reason"] == "body_limit"
+            assert recovered["body_read_attempts"] == 2 and calls["/binary"] == 1
+            assert any(h["unavailable_reason"] == "body_evicted" for h in recovered["body_read_history"])
             assert monitor._body_bytes <= 64
         finally:
             release_streams.set()
@@ -180,6 +202,9 @@ def test_structured_redaction_and_byte_chunks():
     assert "visible" in safe_url("https://example.test/a?q=visible&token=private")
     assert "private" not in safe_url("https://example.test/a?q=visible&token=private")
     assert safe_headers([{"name": "Authorization", "value": "private"}])[0]["value"] == "[redacted]"
+    assert safe_headers([{"name": "Location", "value": "../login?q=ordinary&token=private"}])[0]["value"].startswith("../login?q=ordinary&token=%5Bredacted%5D")
+    for location in ("javascript:alert(1)", "file:///private", "data:text/plain,private"):
+        assert safe_headers([{"name": "Location", "value": location}])[0]["value"] == "[unsupported-scheme]"
     for name in ("X-Authorization", "X-Cookie", "X-CSRF-Token"):
         assert safe_headers([{"name": name, "value": "private"}])[0]["value"] == "[redacted]"
     assert json.loads(safe_body(b'{"ordinary":42,"password":"private"}', "application/json"))["ordinary"] == 42
@@ -192,7 +217,7 @@ def test_structured_redaction_and_byte_chunks():
 async def test_real_concurrent_body_invalidation(monkeypatch, invalidate):
     monkeypatch.setenv("BROWSER_NETWORK_BODY_TIMEOUT_MS", "10000")
     async with detail_site() as site, await BrowserSession.launch(headless=True) as browser:
-        url, release_streams = site
+        url, release_streams, calls = site
         tab = (await browser.new_tab(url))["id"]
         page = browser._page(tab)
         monitor = TrafficMonitor()
@@ -236,3 +261,32 @@ async def test_real_concurrent_body_invalidation(monkeypatch, invalidate):
             await monitor.close()
             if pending is not None:
                 await asyncio.gather(pending, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_real_timed_out_body_recovers_without_reissuing_request(monkeypatch, tmp_path):
+    monkeypatch.setenv("BROWSER_NETWORK_BODY_TIMEOUT_MS", "150")
+    async with detail_site() as site, await BrowserSession.launch(headless=True) as browser:
+        url, release_streams, calls = site
+        tab = (await browser.new_tab(url))["id"]
+        page = browser._page(tab)
+        monitor = TrafficMonitor()
+        try:
+            await monitor.start(page, tab)
+            async with page.expect_response(lambda response: response.url.endswith("/stream")):
+                await page.click("#stream")
+            request_id = next(e["request_id"] for e in monitor.list(tab, "network")["events"] if e["event"] == "response")
+            unavailable = await monitor.request_body(tab, request_id)
+            assert unavailable["data"] is None and unavailable["unavailable_reason"] == "timeout"
+            assert unavailable["body_read_attempts"] == 1 and calls["/stream"] == 1
+            async with page.expect_event("requestfinished", predicate=lambda request: request.url.endswith("/stream")):
+                release_streams.set()
+            recovered = await monitor.request_body(tab, request_id)
+            assert recovered["data"].encode() == b"data: waiting\n\n"
+            assert recovered["source_complete"] and recovered["unavailable_reason"] is None
+            assert recovered["body_read_attempts"] == 2 and calls["/stream"] == 1
+            assert recovered["body_read_history"][0]["unavailable_reason"] == "timeout"
+            (tmp_path / "network-body-recovery.json").write_text(json.dumps({"first": unavailable, "recovered": recovered, "http_request_count": calls["/stream"]}, indent=2))
+        finally:
+            release_streams.set()
+            await monitor.close()

@@ -344,13 +344,22 @@ class TrafficMonitor:
         if key in self._body_cache:
             self._body_cache.move_to_end(key)
             return self._body_cache[key]
-        if part in record["body_status"]:
-            return None
+        previous = record["body_status"].get(part)
+        if previous is not None:
+            reason = previous.get("unavailable_reason")
+            recoverable = reason == "body_evicted" or (reason in {"timeout", "response_pending", "browser_body_unavailable"} and record["state"] == "finished")
+            if not recoverable:
+                return None
+            history = record.setdefault("body_history", {}).setdefault(part, deque(maxlen=8))
+            history.append({"attempt": record.get("body_attempts", {}).get(part, 0), **previous})
+            record["body_status"].pop(part)
         handle = record[part]
         if handle is None:
             if record["state"] != "pending":
                 record["body_status"][part] = {"unavailable_reason": "no_response", "source_complete": False}
             return None
+        attempts = record.setdefault("body_attempts", {})
+        attempts[part] = attempts.get(part, 0) + 1
         try:
             if part == "request":
                 data = handle.post_data_buffer or b""
@@ -424,6 +433,9 @@ class TrafficMonitor:
         return {"tab_id": tab_id, "request_id": request_id, "capture_id": c.capture_id, "part": part,
                 "privacy_note": PRIVACY_NOTE, "redaction_best_effort": not include_sensitive,
                 "export_total_bytes": len(data) if data is not None else None,
+                "body_read_attempts": record.get("body_attempts", {}).get(part, 0),
+                "body_read_history": (list(record.get("body_history", {}).get(part, ())) +
+                                      [{"attempt": record.get("body_attempts", {}).get(part, 0), **status}])[-8:],
                 **body_chunk(data, offset=offset, limit=limit, **status)}
 
     def _websocket(self, c: _Capture) -> None:
