@@ -12,6 +12,7 @@ from collections import deque
 from typing import Callable
 
 from .providers import ProviderError, ProviderRefusal, action_candidates
+from .page_state import compose_page_state, recovery_policy_from_env, reload_approval_reason
 
 
 class BrowserAgent:
@@ -19,7 +20,9 @@ class BrowserAgent:
                  approval: Callable | None = None, screenshot: bool = False,
                  max_text: int = 12000, history_limit: int = 8,
                  no_progress_limit: int = 3, verification_threshold: float = 0.9,
-                 stale_limit: int = 3):
+                 stale_limit: int = 3, interpret_visual: bool = False,
+                 visual_summary: bool | None = None, on_progress: Callable | None = None,
+                 recovery_policy: dict | None = None):
         if max_steps < 1 or history_limit < 1 or no_progress_limit < 1 or stale_limit < 0 or max_text < 1:
             raise ValueError("Agent bounds must be positive")
         if not 0 <= verification_threshold <= 1:
@@ -28,7 +31,10 @@ class BrowserAgent:
         self.provider = provider
         self.max_steps = max_steps
         self.approval = approval
-        self.screenshot = screenshot
+        self.interpret_visual = interpret_visual if visual_summary is None else visual_summary
+        self.screenshot = screenshot or self.interpret_visual
+        self.on_progress = on_progress
+        self.recovery_policy = copy.deepcopy(recovery_policy) if recovery_policy is not None else recovery_policy_from_env()
         self.max_text = max_text
         self.history_limit = history_limit
         self.no_progress_limit = no_progress_limit
@@ -53,8 +59,10 @@ class BrowserAgent:
         return hashlib.sha256(json.dumps(state, sort_keys=True).encode()).hexdigest()
 
     @staticmethod
-    def _approval_reason(action: dict, observation: dict) -> str | None:
+    def _approval_reason(action: dict, observation: dict, *, recovery_policy: dict | None = None) -> str | None:
         operation = action["operation"]
+        if operation == "reload":
+            return reload_approval_reason(observation, recovery_policy)
         element = next((e for e in observation.get("elements", []) if e.get("id") == action.get("target")), {})
         description = " ".join(str(element.get(k, "")) for k in ("name", "role", "type", "input_type", "href", "form_action")).lower()
         activation_key = str(action.get("key", "")).split("+")[-1].lower()
@@ -106,6 +114,33 @@ class BrowserAgent:
         text_offsets: dict[int, int] = {}
         evidence_budget = max(0, getattr(self.provider, "max_context_chars", 48000) - self.max_text - len(goal) - 8000)
 
+        progress_seq = 0
+        last_event = None
+        last_event_at = 0.0
+
+        async def emit(checkpoint: str, page: dict | None = None, *, terminal_status: str | None = None) -> None:
+            nonlocal progress_seq, last_event, last_event_at
+            if self.on_progress is None:
+                return
+            descriptor = (page or {}).get("page_state", {})
+            # No page/model text, URL, screenshot, or typed action values cross this channel.
+            semantic = {"state": descriptor.get("state", "unknown"),
+                        "source": descriptor.get("source", "dom"),
+                        "coverage_status": descriptor.get("coverage_status", "unknown"),
+                        "recovery_available": bool(descriptor.get("recovery_candidates")),
+                        "approval_required": any(c.get("approval_required", True) for c in descriptor.get("recovery_candidates", [])),
+                        "capture_scope": "page_viewport_not_desktop"}
+            signature = (checkpoint, terminal_status, json.dumps(semantic, sort_keys=True), len(steps))
+            now = time.monotonic()
+            if signature == last_event and now - last_event_at < 0.25:
+                return
+            progress_seq += 1
+            last_event, last_event_at = signature, now
+            event = {"seq": progress_seq, "checkpoint": checkpoint, "step": len(steps),
+                     "status": terminal_status or "running", "page_state": semantic}
+            callback_result = self.on_progress(event)
+            if inspect.isawaitable(callback_result):
+                await callback_result
         def evidence_metadata(page: dict) -> None:
             page["verification_evidence"] = {"retained_offsets": list(text_offsets),
                 "retained_chars": sum(text_offsets.values()), "continuation_budget_chars": evidence_budget,
@@ -123,12 +158,18 @@ class BrowserAgent:
         async def observe() -> dict:
             begin = time.perf_counter()
             result = await self._observe(tab_id)
+            if self.interpret_visual:
+                visual = await self.provider.interpret_visual(result)
+                account(getattr(self.provider, "last_metrics", {}))
+                result["visual_summary"] = visual
+            result["page_state"] = compose_page_state(result, result.get("visual_summary"), self.recovery_policy)
             result["text_offset"] = 0
             known_tabs[tab_id] = {"id": tab_id, "url": result.get("url"), "title": result.get("title")}
             result["available_tabs"] = [tab for id_, tab in known_tabs.items() if id_ != tab_id]
             text_offsets.clear()
             evidence_metadata(result)
             metrics["browser_ms"] += (time.perf_counter() - begin) * 1000
+            await emit("observe", result)
             return result
 
         async def read_text(offset: int) -> dict:
@@ -215,11 +256,14 @@ class BrowserAgent:
                     text = await self.provider.field_text(observation, goal, action["target"], list(history))
                     account(getattr(self.provider, "last_metrics", {}))
                     action["text"] = text
-                reason = self._approval_reason(action, observation)
+                reason = self._approval_reason(action, observation, recovery_policy=self.recovery_policy)
                 if reason:
                     binding = hashlib.sha256(json.dumps({"tab_id": tab_id, "action": action}, sort_keys=True).encode()).hexdigest()
                     pending = {"tab_id": tab_id, "observation_id": observation["id"],
                                "action": copy.deepcopy(action), "reason": reason, "binding": binding}
+                    if operation == "reload":
+                        pending["recovery"] = copy.deepcopy(observation["page_state"]["recovery_candidates"])
+                    await emit("needs_user", observation, terminal_status="approval_required")
                     if self.approval is None:
                         status = "approval_required"
                         break
@@ -239,6 +283,7 @@ class BrowserAgent:
                         stale_count += 1
                         metrics["stale_reobservations"] += 1
                         history.append({"operation": operation, "result": "stale_before_input; reobserve without replay"})
+                        await emit("reobserve", observation)
                         observation = await observe()
                         continue
                     status, error = "blocked", "Browser action failed; not replayed: " + type(exc).__name__
@@ -271,6 +316,7 @@ class BrowserAgent:
         finally:
             self._running = False
         metrics["elapsed_ms"] = (time.perf_counter() - started) * 1000
+        await emit("cancelled" if status == "cancelled" else "blocked" if status in {"blocked", "no_progress", "refused", "provider_error", "verification_failed", "step_limit"} else "done", observation, terminal_status=status)
         result = {"status": status, "steps": steps, "observation": observation,
                   "verification": verification, "metrics": metrics, "active_tab": tab_id}
         if pending is not None:
