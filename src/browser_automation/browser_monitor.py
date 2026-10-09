@@ -116,8 +116,9 @@ class _Capture:
                 "max_payload_bytes": self.max_payload_bytes, "dropped": self.dropped,
                 "identity_evictions": self.identity_evictions,
                 "cleanup_diagnostics": list(self.cleanup_diagnostics),
-                "scope": "page_events" if self.kind == "network" else "main_page_cdp_target",
-                "scope_limitations": ["WebSockets in workers or out-of-process child frame targets are not captured by the main-page CDP session."] if self.kind == "websocket" else [],
+                "capture_scope": "page_events" if self.kind == "network" else "main_page_cdp_target",
+                "control_frame_visibility": "not_guaranteed_by_cdp" if self.kind == "websocket" else None,
+                "scope_limitations": ["WebSockets in workers or out-of-process child frame targets are not captured by the main-page CDP session.", "CDP may omit protocol control frames (ping/pong/close); opcode values are only those actually emitted by CDP."] if self.kind == "websocket" else [],
                 "payload_warning": "Text payload redaction is best effort; sensitive data may remain." if self.payloads else None}
 
 

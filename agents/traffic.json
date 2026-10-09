@@ -2,7 +2,7 @@
   "owner": "Traffic",
   "issues": ["05", "06"],
   "owned_paths": ["src/browser_automation/browser_monitor.py", "tests/test_browser_monitor.py", "agents/traffic.json"],
-  "phase": "READY for coordinated verification; no checks run mid-flight",
+  "phase": "PASS scoped authorized real-browser verification; coordinated global suite remains ReleaseDocs responsibility",
   "review_repairs": "Same-configuration duplicate start returns already_active; changed configuration rejects with stop/start instruction. Listener cleanup errors return bounded safe codes; background task exceptions are retrieved and recorded. Startup failure and cleanup fault-only unit fixtures added. Websocket metadata explicitly limits scope to main-page CDP target, excluding workers/OOP child frame targets.",
   "contract": {
     "start": "async start(page, tab_id, kind='network', max_events=256, url_filter=None, payloads=False, max_payload_bytes=512) -> dict",
@@ -18,7 +18,18 @@
     {"url": "https://chromedevtools.github.io/devtools-protocol/tot/Network/", "accessed": "2026-10-09", "schema_source": "https://raw.githubusercontent.com/ChromeDevTools/devtools-protocol/master/json/browser_protocol.json", "schema": "webSocketCreated, HandshakeResponseReceived, FrameSent/Received, FrameError, Closed; WebSocketFrame opcode and payloadData; opcode1 UTF8 otherwise base64; represents entire message not fragmented wire frame"}
   ],
   "security": "No HTTP bodies, postdata, cookies, auth or headers exposed. URL userinfo/query/fragment removed, protected schemes suppressed. Request tracking uses bounded weak references. Socket metadata/rings bounded. Text payloads contain explicit redaction limitation warning. No interception.",
-  "verification": {"executed": [], "planned_authorized_command": "BROWSER_AGENT_LIBRARY_PATH=/home/claw/.local/lib/chromium/usr/lib/x86_64-linux-gnu uv run pytest tests/test_browser_monitor.py -q", "fixtures": "Real local asyncio HTTP503/redirect/failure and RFC6455 echo/ping/binary/error/close server; browser UI never displays results; screenshot proof via pytest tmp_path. Tests require Chromium and explicit parent gate."},
-  "limitations": ["Monitoring is prospective; preexisting requests and sockets may be incomplete", "Websocket scope is main-page CDP target; worker and out-of-process child-frame sockets are explicitly excluded in returned metadata", "CDP WebSocket messages do not expose fragmented-wire-frame boundaries", "Text redaction cannot guarantee removal of arbitrary secrets", "Actual Chromium ping/pong visibility remains to be exercised at parent verification gate"],
+  "verification": {
+    "authorization": "Main lifted verification gate for runtime owners before execution",
+    "command": "BROWSER_AGENT_LIBRARY_PATH=/home/claw/.local/lib/chromium/usr/lib/x86_64-linux-gnu uv run pytest tests/test_browser_monitor.py -q",
+    "first_run": "4 passed, 1 failed in 13.31s; genuine protocol ping9/automatic pong10 omitted by Chromium CDP; actual events only opcodes1/2. No fabricated replacement events.",
+    "repair": "Parent explicitly accepted platform limitation; expose control_frame_visibility=not_guaranteed_by_cdp. Test genuine protocol ping while accepting actual CDP opcodes; separately prove outgoing text ping and incoming text pong, both opcode1.",
+    "final_run": "5 passed in 10.86s",
+    "browser_fixtures": "Real local asyncio HTTP503/redirect/blocked-port requestfailed and RFC6455 echo/ping/binary/error/close; browser UI deliberately does not display traffic results. HTTP status vs failed, redirect correlation, other-tab exclusion, bounded cursor gap/filter, stop/page-close teardown, open/close/error inventory, late attach, host consent/redaction, binary metadata and injected failure-only cleanup covered.",
+    "evidence_directory": "/tmp/pytest-of-claw/pytest-1748",
+    "evidence_files": ["test_real_http_status_failure_0/network-quiet-ui.png", "test_real_http_status_failure_0/network-browser-events.json", "test_real_websocket_opcodes_in0/websocket-quiet-ui.png", "test_real_websocket_opcodes_in0/websocket-browser-events.json", "test_payload_host_consent_reda0/websocket-text-ping-pong.json"],
+    "screenshot_review": "Both independent screenshots inspected: Quiet UI and Request/Socket/End/Error buttons only, no network status/message contents; event JSON contains actual capture metadata.",
+    "evidence_boundary": "Machine-local pytest temporary artifacts; not durable public links; no raw payloads or private screenshots committed"
+  },
+  "limitations": ["Monitoring is prospective; preexisting requests and sockets may be incomplete", "Websocket scope is main-page CDP target; worker and out-of-process child-frame sockets explicitly excluded in metadata", "CDP WebSocket messages do not expose fragmented-wire-frame boundaries", "Text redaction cannot guarantee removal of arbitrary secrets", "Actual Chromium CDP omitted protocol control ping9/pong10 from genuine server-ping fixture; text ping/pong opcode1 succeeds; returned control_frame_visibility explicitly not guaranteed"],
   "preserved": ["doc.md", "issues reports"]
 }

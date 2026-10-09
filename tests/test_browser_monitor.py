@@ -60,7 +60,7 @@ async def traffic_site():
                         await send(8, struct.pack("!H", 1000))
                         return
                     if opcode == 1:
-                        await send(1, payload)
+                        await send(1, b"pong" if payload == b"ping" else payload)
                 return
             status = "503 Service Unavailable" if path == "/503" else "302 Found" if path == "/redirect" else "400 Bad Request" if path == "/badws" else "200 OK"
             body = b"backend-unavailable" if path == "/503" else b'''<!doctype html><title>Traffic fixture</title><h1>Quiet UI</h1>
@@ -128,6 +128,7 @@ async def test_real_http_status_failure_redirect_scope_and_cursor(tmp_path):
             assert "never-retain" not in encoded and "?secret=" not in encoded
             assert await page.locator("h1").inner_text() == "Quiet UI"
             await page.screenshot(path=str(tmp_path / "network-quiet-ui.png"))
+            (tmp_path / "network-browser-events.json").write_text(json.dumps(result, indent=2))
             assert monitor.list(tab, "network", cursor=result["next_cursor"])["events"] == []
             with pytest.raises(ValueError, match="cursor"):
                 monitor.list(tab, "network", cursor=result["latest_cursor"] + 1)
@@ -159,7 +160,11 @@ async def test_real_websocket_opcodes_inventory_late_attach_and_teardown(tmp_pat
             await asyncio.sleep(0.1)
             assert monitor.list(tab, "websocket")["events"] == []
             await page.click("#socket")
-            result = await until(monitor, tab, "websocket", lambda r: {1, 2, 9, 10} <= {e.get("opcode") for e in r["events"]})
+            result = await until(monitor, tab, "websocket", lambda r: {1, 2} <= {e.get("opcode") for e in r["events"]})
+            await asyncio.sleep(0.1)
+            result = monitor.list(tab, "websocket")
+            assert result["control_frame_visibility"] == "not_guaranteed_by_cdp"
+            (tmp_path / "websocket-browser-events.json").write_text(json.dumps(result, indent=2))
             assert any(e["event"] == "open" and e["status"] == 101 for e in result["events"])
             assert any(e["opcode"] == 2 and e["byte_count"] == 3 for e in result["events"] if "opcode" in e)
             assert all("text" not in e for e in result["events"])
@@ -187,7 +192,7 @@ async def test_real_websocket_opcodes_inventory_late_attach_and_teardown(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_payload_host_consent_redaction_and_binary_metadata(monkeypatch):
+async def test_payload_host_consent_redaction_and_binary_metadata(monkeypatch, tmp_path):
     async with traffic_site() as url, await BrowserSession.launch(headless=True) as browser:
         tab = (await browser.new_tab(url))["id"]
         page = browser._page(tab)
@@ -201,6 +206,12 @@ async def test_payload_host_consent_redaction_and_binary_metadata(monkeypatch):
             await monitor.start(page, tab, "websocket", payloads=True, max_payload_bytes=64)
             await page.click("#socket")
             result = await until(monitor, tab, "websocket", lambda r: any(e.get("opcode") == 2 for e in r["events"]))
+            await page.evaluate("socket.send('ping')")
+            result = await until(monitor, tab, "websocket", lambda r: any(e.get("text") == "pong" for e in r["events"]))
+            ping_pong = [e for e in result["events"] if e.get("text") in {"ping", "pong"}]
+            assert any(e["event"] == "frame_sent" and e["text"] == "ping" and e["opcode"] == 1 for e in ping_pong)
+            assert any(e["event"] == "frame_received" and e["text"] == "pong" and e["opcode"] == 1 for e in ping_pong)
+            (tmp_path / "websocket-text-ping-pong.json").write_text(json.dumps(ping_pong, indent=2))
             texts = [e["text"] for e in result["events"] if "text" in e]
             assert any("[redacted]" in t for t in texts)
             assert not any("hidden" in t or "a@b.example" in t for t in texts)
