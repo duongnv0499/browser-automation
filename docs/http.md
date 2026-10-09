@@ -6,6 +6,8 @@ Streamable HTTP is an **additional** transport; `browser-agent-mcp` without flag
 
 For Codex “install this repo,” use [install.md](../install.md). Default installation is local stdio; request HTTP explicitly and distinguish registering an existing endpoint from installing a server on the browser host. Native versus isolated is a separate user choice.
 
+The same [network inspection/API workflow](network.md) is available over authenticated HTTP as over stdio/CLI/OMP: multiple-tab captures, request/response chunks and calls/replay in the server-side browser cookie context. Discovery is dynamic; HTTP introduces no reduced metadata-only catalog. Bearer authentication is not sensitive-data consent or consequential-request approval. Response bodies are chunked independently of the inbound HTTP request-size bound; selected output may be disclosed to an agent/model and must be reviewed.
+
 ## Install and start
 
 ```sh

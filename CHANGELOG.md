@@ -2,6 +2,10 @@
 
 ## 0.1.0 — Unreleased
 
+- Add actual network query/header/payload/response-body inspection with selectable sensitive output, transparent byte/base64 chunking and explicit retention/unavailable diagnostics; keep private replay credentials out of model previews.
+- Add browser-cookie-context API call/replay across authorized HTTP(S) endpoints and methods, immutable exact-approved plans for consequential requests, ordinary same-origin safe-read dispatch, strict host approval mode, manual redirect credential boundaries and separate API-response provenance.
+- Add explicit multi-tab capture and future-tab/pop-up opt-in, plus detail/body/call/replay/execute tools through the shared CLI, MCP stdio/current+legacy HTTP and OMP catalog; discover tools dynamically instead of requiring an obsolete fixed count.
+
 - Add bounded navigation that preserves owned tabs on timeout, safe skipped-subframe diagnostics and independent DOM coverage; improve generic custom-element/shadow/display:contents collection without expanding protected-document authority.
 - Replace whole-viewport visual equality with exact target-local pixel guards while retaining semantic/geometry/occlusion checks and fail-closed changed-target diagnostics.
 - Add scoped bounded HTTP and application-WebSocket monitors with cursor/history metadata, HTTP status/failure distinction, true frame opcodes and safe metadata defaults; text payload capture requires explicit host-and-call opt-in.

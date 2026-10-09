@@ -53,7 +53,7 @@ Use fresh observations after actions. Stale/covered/wrong-tab/unsupported action
 
 ### Scoped traffic diagnostics
 
-Tools `network_start`, `network_list`, `network_stop`, `websocket_start`, `websocket_list`, `websocket_stop` use the same retained `session_id`/`tab_id` as observation. Start accepts `max_events` (1–4096, default 256), literal substring `url_filter` (at most 256 characters), `payloads` (default false) and `max_payload_bytes` (1–4096, default 512). List accepts optional integer `cursor >= 0` and `limit` (1–1000, default 100). Inspect returned cursor/drop/history metadata rather than assuming complete history. Start before triggering the interaction; stop/close removes listeners and other tabs are not captured.
+Single-tab `network_start`, `network_list`, `network_stop` and application `websocket_*` monitors use the retained `session_id`/`tab_id`. Network multi-tab tools are `network_start_many` (`tab_ids`, optional `include_new_tabs`), `network_list_many` (`tab_ids`, per-tab `cursors`) and `network_stop_many`. Start before interaction, inspect each capture's result and cursor/drop/history metadata, and stop the scope explicitly. List limits and max events bound retained evidence, not browser-wide completeness.
 
 ```json
 {"id":7,"command":"network_start","arguments":{"session_id":"RETURNED_SESSION","tab_id":"RETURNED_TAB","max_events":256}}
@@ -61,7 +61,9 @@ Tools `network_start`, `network_list`, `network_stop`, `websocket_start`, `webso
 {"id":9,"command":"network_stop","arguments":{"session_id":"RETURNED_SESSION","tab_id":"RETURNED_TAB"}}
 ```
 
-HTTP 503 is a response status, not a transport failure. Defaults exclude bodies, cookies, Authorization and POST data; URLs are sanitized. Website WebSocket inventory/frames are distinct from the CDP transport. Opcode, size, lifecycle, `capture_started_at` and incomplete-history metadata do not require text payloads. Text payloads require both requested opt-in and host `BROWSER_MONITOR_PAYLOADS=1`; bounded redaction cannot guarantee all secrets are removed. Binary frames are metadata only. Do not enable payloads on private account traffic just to diagnose connectivity.
+HTTP 503 is a response status, not a transport failure. Lightweight list defaults remain sanitized metadata. `network_detail` accepts `request_id`, optional `fields` and `include_sensitive`; `network_body` accepts `request_id`, `part` (`request`/`response`), byte `offset`, `limit` and `include_sensitive`. Sensitive inspection additionally needs host `BROWSER_NETWORK_SENSITIVE=1`. Read `next_offset` and completeness/unavailable fields, including base64 binary chunks. These are actual selected request/response data, not reconstructed pre-capture history. Website WebSockets retain their separate host `BROWSER_MONITOR_PAYLOADS` opt-in and main-page CDP/control-frame limitations.
+
+`network_call` takes `url`, optional `method`, `headers`, `params`, one of `body`/`json_body`/`form`/`body_base64`, `timeout_ms`, `max_redirects` and `prepare_only`. `network_replay` uses captured `request_id`, the same deliberate overrides and optional `target_tab_id`. Ordinary trusted same-origin safe reads return an actual response; other plans return `approval_required` and the exact binding. The host uses the existing interactive `browser-agent approve` workflow with that returned binding, then the caller invokes `network_execute(session_id, plan_id, approval_token)`. No raw credentials are in the approval preview. See [the network guide](network.md) for cookie context, privacy, all-method capability, redirect policy and independent UI verification.
 
 ### Incremental progress
 
@@ -69,7 +71,7 @@ JSONL opts in with a top-level `"progress": true` on the request. Interim `{"id"
 
 ## MCP stdio
 
-The MCP server supports initialization, version negotiation, tools/list, tools/call, ping, cancellation, and EOF cleanup. Its **21 tools** mirror the persistent CLI surface, including `doctor`, `tabs`, `close_tab`, `run`, `upload`, `download`, `connect_default` and six network/WebSocket start/list/stop tools. `observe` returns compact structured/text metadata and screenshot in a separate `image/png` MCP image block, not a base64 string stuffed into text. Tool failures use `isError` with structured `error`; JSON-RPC failures use protocol errors.
+The MCP server supports initialization, version negotiation, tools/list, tools/call, ping, cancellation, and EOF cleanup. Tools mirror the persistent CLI catalog, including browser lifecycle/control, monitoring, multi-tab network inspection and approved API execution. Discover the current catalog dynamically rather than checking a fixed count. `observe` returns compact structured/text metadata and screenshot in a separate `image/png` MCP image block, not a base64 string stuffed into text. Tool failures use `isError` with structured `error`; JSON-RPC failures use protocol errors.
 
 Use absolute paths and do not put API keys directly into checked-in configuration. Primary sources: [Codex MCP](https://developers.openai.com/codex/mcp), [Claude Code MCP](https://code.claude.com/docs/en/mcp), [Hermes MCP](https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp).
 

@@ -59,7 +59,7 @@ PY
 
 On Windows, also apply a user-only ACL appropriate to the host; POSIX mode bits alone are not a Windows privacy guarantee. Report API-key **presence only**. Preserve existing credentials and host settings; warn privately about unsafe permissions rather than printing secrets. `.env` is explicitly loaded by `uv --env-file`; the package does not auto-load it. Never put keys in MCP TOML, command arguments, shell history, Git, or diagnostic artifacts.
 
-Leave `BROWSER_RECOVERY_POLICY` and `BROWSER_MONITOR_PAYLOADS` unset unless the operator explicitly requests their reviewed scope; installation must not grant reload exceptions or traffic-payload disclosure. Structured DOM state/coverage and metadata-only traffic diagnostics need no provider key. `interpret_visual` is a separate opt-in paid multimodal call, not a consequence of installing screenshot support. Progress is a client per-call opt-in, not a background OS-screen service. See [recovery/visual boundaries](docs/providers.md#operator-controlled-recovery) and [monitor/progress interfaces](docs/integrations.md#scoped-traffic-diagnostics).
+Leave `BROWSER_RECOVERY_POLICY`, `BROWSER_MONITOR_PAYLOADS` and `BROWSER_NETWORK_SENSITIVE` unset unless the operator explicitly requests their reviewed scope; installation must not grant reload exceptions or sensitive traffic disclosure. Ordinary sanitized network detail/body inspection needs no provider key. Calls/replay support the browser cookie context across multiple tabs: ordinary same-origin safe reads execute directly, while consequential plans need exact host approval; the operator may require approval for all calls with `BROWSER_NETWORK_REQUIRE_APPROVAL=1`. Installation does not approve account API operations. `interpret_visual` remains a separate opt-in paid call and progress a per-call opt-in, not OS-screen monitoring. See [network workflow/privacy](docs/network.md) and [recovery boundaries](docs/providers.md#operator-controlled-recovery).
 
 ## 3. Register MCP idempotently
 
@@ -122,7 +122,7 @@ Codex officially supports symlink discovery. On systems where symlinks are unava
 
 ## 5. Verify the actual protocol and discovery
 
-Do not stop at `codex mcp list`. Prefer the reloaded client's actual MCP tool catalog and a successful `doctor` tool call. If the installing conversation cannot refresh tools, use the official SDK against the **same configured transport** as below, then explicitly distinguish protocol health from current-session Codex tool availability. Do not use a paid model turn for installation diagnostics.
+Do not stop at `codex mcp list`. Prefer the reloaded client's actual MCP tool catalog and a successful `doctor` tool call. Discover the catalog dynamically, including network multi-tab/detail/body/call/replay/execute tools; do not require an obsolete fixed count. If the installing conversation cannot refresh tools, use the official SDK against the **same configured transport** as below, then explicitly distinguish protocol health from current-session Codex tool availability. Do not use a paid model turn for installation diagnostics.
 
 For stdio, run this temporary diagnostic through the checkout's Python using the official SDK as an ephemeral dependency (no repository/lock changes). It opens a real subprocess, negotiates initialization, lists tools, calls `doctor`, checks failure status, and closes the subprocess. Use the actual registration arguments/environment; if registration differs, adapt to it rather than testing a different server.
 

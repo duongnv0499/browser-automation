@@ -18,12 +18,13 @@
     "resources": "Bounded configurable request/body storage and inbound/outbound sizes; transparent loss and APIResponse disposal on eviction/close. Protected local URLs, native consent, authentication and permissions remain enforced."
   },
   "lifecycle": {
-    "phase": "implementation; documentation interfaces awaiting owner final schema",
+    "phase": "NetworkDocs documentation READY: guide/schema/privacy/multi-tab/approval/research aligned with capture and Surface owner contracts; implementation workers still own their readiness and parent coordinates verification",
     "ready_gate": "All workers READY, then parent authorizes coordinated scoped checks. No worker tests/build/lint/format/smoke mid-flight.",
     "release_gate": "After stable scoped PASS parent authorizes final full suite/build and clean installed-wheel real browser plus official SDK stdio/current+legacy HTTP, CLI and actual OMP consumers; parent independently opens rendered output/screenshots.",
     "compaction": "Re-read AGENTS.md, agents/workstreams.json, this tracker, owning state and changed owned source; persist contracts/ownership/blockers, never trust chat memory alone.",
     "preserved": ["doc.md", "issues/", "installed client configuration", "credentials", "native profiles", "private screenshots/traces"]
   },
   "evidence": {"new_feature_checks": "Not yet authorized or executed; prior 152-test release evidence is historical, not proof of this feature.", "credentials": "No paid model credentials or personal native profile; disposable cookie-authenticated Chromium fixtures do not prove a real user's account."},
-  "commits": []
+  "commits": [{"hash": "5802544", "message": "docs: persist network DevTools workstream contracts", "pushed": "origin/main", "paths": ["agents/workstreams.json", "agents/network-devtools.json"]}, {"hash": "222368b", "message": "feat(network): capture on-demand request details and bounded body chunks", "pushed": "origin/main", "paths": ["src/browser_automation/browser_monitor.py", "src/browser_automation/browser_network_data.py", "tests/test_network_details.py", "agents/capture-details.json"]}],
+  "network_docs_state": {"status": "READY", "checks": "None run; only installed SDK signature research. Await parent gate for any release checks.", "schema": "Dynamic shared catalog; start/list/stop_many plus detail/body/call/replay/execute. Default safe same-origin reads with stricter host option; sensitive exports host+caller opt-in.", "git_queue": "Serialize owner-approved exact paths; feature docs milestone ready; final release evidence must be sourced from parent-authorized executed checks."}
 }

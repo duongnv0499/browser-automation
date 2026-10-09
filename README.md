@@ -10,11 +10,13 @@ Guarded browser control and a multimodal Luna Decisions agent for Python, Codex,
 - Persistent JSONL CLI, default MCP stdio and optional authenticated Streamable HTTP; independent verification before a model-selected DONE counts as success.
 - Explicit native-profile consent, owned-tab lifecycle, and approval-bound consequential actions/file transfers.
 - Structured DOM coverage/page state, opt-in provider visual summaries and incremental bounded-run progress; recovery remains host-policy/approval controlled.
-- Bounded owned-tab navigation and scoped passive HTTP/application-WebSocket diagnostics with safe metadata defaults.
+- Bounded owned-tab navigation, multi-tab network capture with query/header/payload/response-body inspection, browser-context API calls/replay, and application-WebSocket diagnostics.
 
 These are design capabilities, not claims of better performance than Jev or Codex. Supported surfaces, limitations, and verification evidence are documented below.
 
 For agent-native diagnosis, see [navigation/coverage and frame safety](docs/browser.md), [visual provenance/recovery authority](docs/providers.md#page-state-and-opt-in-visual-interpretation), and [monitor/progress tools](docs/integrations.md#bounded-navigation-and-semantic-observation). These capabilities do not establish a live YouTube/Facebook/TikTok repair, personal macOS/native-profile proof or live-model quality; dated exercised evidence and limits are in [research](docs/research.md).
+
+For DevTools-style API work, follow [the network workflow](docs/network.md): list tabs, start capture before acting, inspect request/response chunks, then call or replay in the selected browser cookie context. Ordinary same-origin safe reads execute directly; consequential/foreign-origin/credential-edited plans require exact host approval. All authorized HTTP(S) endpoints and methods remain callable, and API responses are distinct from rendered UI verification.
 
 ## Let your coding agent install
 
