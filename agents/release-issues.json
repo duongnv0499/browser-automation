@@ -1,71 +1,138 @@
 {
   "owner": "ReleaseDocs",
   "date": "2026-10-09",
-  "phase": "implementation; waiting for owner implementation handoffs and parent verification authorization",
+  "phase": "complete: all eight local acceptance flows verified; release documentation/state ready for final commit/push",
   "issues": {
     "01": {
       "title": "protected subframes",
       "owner": "BrowserCore",
       "report": "issues/01-protected-subframes.md",
       "acceptance": "Hidden data/blob frames preserve main DOM and screenshot; safely identify skipped frame/reason; protected main documents remain denied; visible protected frames masked or screenshot withheld, never leaked.",
-      "status": "implementation_in_progress",
-      "evidence": []
+      "status": "verified_local_acceptance_with_documented_limits",
+      "evidence": {
+        "canonical": "docs/research.md#eight-issue-release-gate--2026-10-09",
+        "owner_state": "agents/browser-core.json",
+        "unified_root": "/tmp/browser-release-final-proof"
+      },
+      "regression_cases": [
+        "tests/test_browser_observation.py::test_hidden_protected_frame_keeps_parent_and_pixels",
+        "tests/test_browser_observation.py::test_visible_protected_frame_withholds_pixels_not_parent"
+      ]
     },
     "02": {
       "title": "semantic DOM coverage",
       "owner": "BrowserCore",
       "report": "issues/02-youtube-empty-dom.md",
       "acceptance": "Generic custom elements/open shadow/display:contents/zero-box/clipping fixtures expose rendered controls; coverage distinct truncation; accessible live YouTube compared to screenshot or explicit access limitation.",
-      "status": "implementation_in_progress",
-      "evidence": []
+      "status": "verified_local_acceptance_with_documented_limits",
+      "evidence": {
+        "canonical": "docs/research.md#eight-issue-release-gate--2026-10-09",
+        "owner_state": "agents/browser-core.json",
+        "unified_root": "/tmp/browser-release-final-proof"
+      },
+      "regression_cases": [
+        "tests/test_browser_observation.py::test_boxless_custom_shadow_and_clipped_semantics"
+      ],
+      "limits": "Actual logged-out YouTube12target/screenshot match, partial frame coverage/no video feed; no logged-in/macOS/personal native result."
     },
     "03": {
       "title": "bounded navigation",
       "owner": "BrowserCore",
       "report": "issues/03-load-timeout.md",
       "acceptance": "Pending-load rendered fixture retains owned tab ID, navigation_status timeout and usable observation/cleanup; configurable wait_until/timeout_ms; no infinite retry.",
-      "status": "implementation_in_progress",
-      "evidence": []
+      "status": "verified_local_acceptance_with_documented_limits",
+      "evidence": {
+        "canonical": "docs/research.md#eight-issue-release-gate--2026-10-09",
+        "owner_state": "agents/browser-core.json",
+        "unified_root": "/tmp/browser-release-final-proof"
+      },
+      "regression_cases": [
+        "tests/test_browser_observation.py::test_load_timeout_retains_observable_owned_tab"
+      ]
     },
     "04": {
       "title": "recovery policy",
       "owner": "DecisionState",
       "report": "issues/04-refresh-policy.md",
       "acceptance": "Snapshot-bound reload recommendation explains data loss/default host approval; host-only exact-origin exception requires complete DOM error evidence and no unsaved/editable/sensitive evidence; custom Refresh remains normal risky click.",
-      "status": "implementation_in_progress",
-      "evidence": []
+      "status": "verified_local_acceptance_with_documented_limits",
+      "evidence": {
+        "canonical": "docs/research.md#eight-issue-release-gate--2026-10-09",
+        "owner_state": "agents/decision-state.json",
+        "unified_root": "/tmp/browser-release-final-proof"
+      },
+      "regression_cases": [
+        "tests/test_page_state.py::test_reload_host_policy_does_not_make_refresh_button_benign",
+        "tests/test_page_state.py::test_reload_risk_always_needs_approval",
+        "tests/test_agent_surface.py::test_reload_approval_binding_preserves_recovery_warning"
+      ]
     },
     "05": {
       "title": "network inspection",
       "owner": "Traffic",
       "report": "issues/05-network.md",
       "acceptance": "Real browser captures UI-hidden HTTP503 response distinctly from requestfailed with redirects/timing/content-type; bounded tab-scoped cursor/filter and listener cleanup; no default body/auth/cookies/postdata.",
-      "status": "ready_unverified",
-      "evidence": []
+      "status": "verified_local_acceptance_with_documented_limits",
+      "evidence": {
+        "canonical": "docs/research.md#eight-issue-release-gate--2026-10-09",
+        "owner_state": "agents/traffic.json",
+        "unified_root": "/tmp/browser-release-final-proof"
+      },
+      "regression_cases": [
+        "tests/test_browser_monitor.py::test_real_http_status_failure_redirect_scope_and_cursor"
+      ]
     },
     "06": {
       "title": "application WebSocket inspection",
       "owner": "Traffic",
       "report": "issues/06-websocket.md",
       "acceptance": "Real open/sent/received/ping/pong/binary/close/error opcode and size events without UI disclosure; scoped cursor/filter/cleanup, capture_started_at/incomplete_history; host-and-call opt-in bounded redacted text, binary metadata only.",
-      "status": "ready_unverified",
-      "evidence": []
+      "status": "verified_local_acceptance_with_documented_limits",
+      "evidence": {
+        "canonical": "docs/research.md#eight-issue-release-gate--2026-10-09",
+        "owner_state": "agents/traffic.json",
+        "unified_root": "/tmp/browser-release-final-proof"
+      },
+      "regression_cases": [
+        "tests/test_browser_monitor.py::test_real_websocket_opcodes_inventory_late_attach_and_teardown",
+        "tests/test_browser_monitor.py::test_payload_host_consent_redaction_and_binary_metadata"
+      ],
+      "limits": "True emitted message opcodes only; CDP omits protocol controls, not_guaranteed_by_cdp; workers/OOP sockets excluded."
     },
     "07": {
       "title": "target-local pixels",
       "owner": "BrowserCore",
       "report": "issues/07-animated-visual.md",
       "acceptance": "Unrelated animation outside observed target permits action, target change rejects with region diagnostic; preserve semantic/geometry/occlusion, exact target pixel compare, no tolerance/replay.",
-      "status": "implementation_in_progress",
-      "evidence": []
+      "status": "verified_local_acceptance_with_documented_limits",
+      "evidence": {
+        "canonical": "docs/research.md#eight-issue-release-gate--2026-10-09",
+        "owner_state": "agents/browser-core.json",
+        "unified_root": "/tmp/browser-release-final-proof"
+      },
+      "regression_cases": [
+        "tests/test_browser_visual.py::test_unrelated_animation_outside_target_does_not_block",
+        "tests/test_browser_visual.py::test_changed_target_pixels_geometry_and_occlusion_rejected",
+        "tests/test_browser_visual.py::test_drag_checks_destination_pixels_not_only_source"
+      ]
     },
     "08": {
       "title": "parent semantic progress",
       "owner": "DecisionState + Surface",
       "report": "issues/08-parent-state.md",
       "acceptance": "DOM/vision provenance distinct; unprimed arbitrary visual-only text through actual local HTTP multimodal provider fixture clearly labeled, recovery approval required; parent progress before final across stdio/modern+legacy HTTP/JSONL/OMP; cancellation preserves unrelated session.",
-      "status": "implementation_in_progress",
-      "evidence": []
+      "status": "verified_local_acceptance_with_documented_limits",
+      "evidence": {
+        "canonical": "docs/research.md#eight-issue-release-gate--2026-10-09",
+        "owner_state": "agents/surface.json",
+        "unified_root": "/tmp/browser-release-final-proof"
+      },
+      "regression_cases": [
+        "tests/test_page_state.py::test_real_viewport_local_http_visual_recovery_consumer",
+        "tests/test_agent_surface.py::test_official_sdk_incremental_progress_real_browser",
+        "tests/test_service_omp.py::test_omp_extension_persistent_progress_callback"
+      ],
+      "limits": "Actual screenshot+unprimed multimodal localHTTP fixture and real progress transports, not paid OCR quality; page viewport not OS foreground."
     }
   },
   "shared_contracts": {
@@ -80,13 +147,19 @@
         "navigation_status",
         "wait_until",
         "diagnostic on timeout"
+      ],
+      "supported_wait_until": [
+        "commit",
+        "domcontentloaded",
+        "load"
       ]
     },
     "observation": "coverage {status:complete|partial|unknown,reasons,dom_elements} separate from text truncation; page_state DOM evidence; screenshot page viewport, not desktop",
     "monitors": "BrowserSession monitor_start/list/stop; network_start/list/stop and websocket_start/list/stop exposed; max_events=256,limit=100,url_filter optional; payloads false,max_payload_bytes=512",
-    "recovery": "BROWSER_RECOVERY_POLICY host JSON reload_without_approval_origins; no caller policy authority; reload exact revision/action approval default",
-    "vision": "interpret_visual false default; opt-in captures PNG and performs configured multimodal text call; source vision/self_reported_confidence not calibrated; DOM and vision separate",
-    "progress": "async on_progress event callback, monotonic bounded seq/page_state/step/status; MCP per-call _meta.progressToken; JSONL progress true interim id/progress; OMP interim onUpdate not final response"
+    "recovery": "BROWSER_RECOVERY_POLICY host JSON reload_without_approval_origins; no caller policy authority; reload exact revision/action approval default; hidden alert/status or accessible labels alone never waive approval; rendered_text_match separate accessible_control_label_match; offscreen fields included",
+    "vision": "interpret_visual false default; opt-in captures PNG and performs configured multimodal text call; source vision/self_reported_confidence not calibrated; DOM and vision separate; region_coverage total/offered/omitted/limit256/priority screenshot_grid_then_visual_then_dom",
+    "progress": "event {seq,checkpoint,step,status,page_state}; structural page_state {state,source,coverage_status,recovery_available,approval_required,capture_scope}; MCP per-call _meta.progressToken, JSONL progress:true interim id/progress, OMP fourth execute onUpdate retains pending final",
+    "websocket_scope": "main_page_cdp_target; workers and OOP child-target sockets excluded, prospective whole-message metadata not fragmented wire-frame boundaries"
   },
   "research": {
     "date": "2026-10-09",
@@ -107,20 +180,226 @@
       "hash": "fc3370c",
       "feature": "navigation/observation safety",
       "pushed": true
+    },
+    {
+      "hash": "918518c",
+      "feature": "release contract documentation",
+      "pushed": true
+    },
+    {
+      "hash": "8607064",
+      "feature": "semantic checkpoint regressions",
+      "pushed": true
+    },
+    {
+      "hash": "315271c",
+      "feature": "exposed diagnostics/progress",
+      "pushed": true
+    },
+    {
+      "hash": "ab13bdf",
+      "feature": "monitor review repairs",
+      "pushed": true
+    },
+    {
+      "hash": "c66d246",
+      "feature": "DOM alert provenance repair",
+      "pushed": true
+    },
+    {
+      "hash": "1c01080",
+      "feature": "agent diagnostics/progress delivery repair",
+      "pushed": true
+    },
+    {
+      "hash": "c2727c4",
+      "feature": "real traffic/CDP control visibility evidence repair",
+      "pushed": true
+    },
+    {
+      "hash": "0bb392b",
+      "feature": "rendered-only recovery permission security repair",
+      "pushed": true
+    },
+    {
+      "hash": "f9be96f",
+      "feature": "surface diagnostics/real streaming consumers",
+      "pushed": true
+    },
+    {
+      "hash": "0db999e",
+      "feature": "real official SDK WebSocket acceptance",
+      "pushed": true
+    },
+    {
+      "hash": "0da07fb",
+      "feature": "target-local pixels/rendered root semantics",
+      "pushed": true
+    },
+    {
+      "hash": "d92fb6d",
+      "feature": "browser consumer/protected input evidence",
+      "pushed": true
+    },
+    {
+      "hash": "2165899",
+      "feature": "dense visual regions/nontext recovery safety",
+      "pushed": true
+    },
+    {
+      "hash": "831ec79",
+      "feature": "navigation schema/OMP safe diagnostics",
+      "pushed": true
+    },
+    {
+      "hash": "317b69b",
+      "feature": "nontext/offscreen form draft safety",
+      "pushed": true
     }
   ],
   "verification": {
-    "authorized": false,
-    "scoped": {},
-    "global": null,
-    "build": null,
-    "installed_wheel": null
+    "authorized": true,
+    "scoped": {
+      "DecisionState": {
+        "command": "BROWSER_AGENT_LIBRARY_PATH=/home/claw/.local/lib/chromium/usr/lib/x86_64-linux-gnu uv run pytest tests/test_agent.py tests/test_providers.py tests/test_page_state.py -q",
+        "result": "60 passed in 10.90s after dense visual region and nontext form fallback repair",
+        "scope": "Owned tests including actual Chromium canvas and browser agent local HTTP consumer fixtures; deterministic provider not live OCR",
+        "evidence": [
+          "/tmp/pytest-of-claw/pytest-1751/test_real_viewport_local_http_0/visual-evidence.json",
+          "/tmp/pytest-of-claw/pytest-1751/test_real_viewport_local_http_0/deterministic-viewport-visual.png"
+        ]
+      },
+      "Traffic": {
+        "command": "BROWSER_AGENT_LIBRARY_PATH=/home/claw/.local/lib/chromium/usr/lib/x86_64-linux-gnu uv run pytest tests/test_browser_monitor.py -q",
+        "outcome": "5 passed in 10.86s",
+        "reported_by": "Traffic",
+        "initial_result": "4 passed,1 failed exposed actual protocol ping/pong omitted by CDP; no invented opcodes; parent accepted explicit visibility limit",
+        "evidence_root": "/tmp/pytest-of-claw/pytest-1748",
+        "visibility": "control_frame_visibility:not_guaranteed_by_cdp; application TEXT ping/pong opcode1 observed"
+      },
+      "Surface": {
+        "authorized_by": "Main after all runtime workers READY and source review repairs",
+        "executed": [
+          {
+            "command": "uv run --extra http pytest -q tests/test_service.py tests/test_mcp_http.py tests/test_agent_surface.py",
+            "result": "29 passed,3 skipped in4.46s"
+          },
+          {
+            "command": "BROWSER_INTEGRATION_TESTS=1 BROWSER_AGENT_LIBRARY_PATH=/home/claw/.local/lib/chromium/usr/lib/x86_64-linux-gnu uv run --extra http pytest -q tests/test_agent_surface.py tests/test_service_stdio.py tests/test_service_omp.py tests/test_mcp_http_browser.py --basetemp=/tmp/browser-surface-proof",
+            "result": "21 passed,3 failed in100.59s; fixture button click correctly paused for approval, so network request never executed. Repaired fixture to explicit safe link and assert act is not approval_required; no policy bypass."
+          },
+          {
+            "command": "same env uv run --extra http pytest -q tests/test_agent_surface.py --basetemp=/tmp/browser-surface-progress-proof",
+            "result": "8 passed in23.71s after fixture repair; includes real host-policy reload allowed and sensitive reload exact host token approval"
+          },
+          {
+            "command": "same env uv run --extra http pytest -q tests/test_agent_surface.py --basetemp=/tmp/browser-surface-progress-final",
+            "result": "8 passed in21.13s after strengthening cancellation no-events-at-return assertion and saving transport evidence"
+          },
+          {
+            "command": "same env uv run --extra http pytest -q tests/test_agent_surface.py::test_official_sdk_websocket_tools_and_host_payload_policy --basetemp=/tmp/browser-surface-websocket-proof",
+            "result": "1 passed in4.68s; official SDK genuine websocket tool frames/opcode1+2/open101/filter/cursor plus host payload rejection and approved socket click"
+          },
+          {
+            "command": "same env uv run --extra http pytest -q tests/test_agent_surface.py tests/test_service_omp.py --basetemp=/tmp/browser-surface-review4-proof",
+            "result": "12 passed in27.32s; navigation advertised modes align browser; actual OMP loader, persistent real worker unknown-observation structured guidance, fault-only changed_region text+details transport consumer, official SDK stdio+modern+legacyHTTP real browser monitoring/visual/progress/cancel/recovery"
+          }
+        ],
+        "evidence": [
+          "/tmp/browser-surface-progress-final/test_official_sdk_incremental_0/stdio-progress-evidence.json",
+          "/tmp/browser-surface-progress-final/test_official_sdk_incremental_1/2026-07-28-progress-evidence.json",
+          "/tmp/browser-surface-progress-final/test_official_sdk_incremental_2/legacy-progress-evidence.json",
+          "/tmp/browser-surface-progress-final/test_official_sdk_incremental_1/2026-07-28-independent.png",
+          "/tmp/browser-surface-proof/test_omp_extension_persistent_0/omp-progress-proof.json",
+          "/tmp/browser-surface-proof/test_actual_omp_extension_load0/omp-proof.json"
+        ],
+        "evidence_facts": "Official SDK stdio+modern+legacy HTTP receive numeric1,2,3 semantic progress BEFORE final. Cancelled run progress count remains1 at cancellation return and after500ms; session retained. Actual503 event captured. Visual provenance vision,calibrated=false via deterministic HTTP provider. Actual OMP loader and real extension persistent worker callback received3 updates with same request_id then final success; separate no-paid-model consumer.",
+        "websocket_surface_evidence": "/tmp/browser-surface-websocket-proof/test_official_sdk_websocket_to0/websocket-tool-evidence.json",
+        "review4_error_evidence": "/tmp/browser-surface-review4-proof/test_omp_changed_region_error_0/omp-structured-error-proof.json",
+        "dependency_resolution": "uv lock completed; added Pillow12.3.0",
+        "remaining": "Parent coordinated global suite/build; GitOwner repair/evidence commit"
+      },
+      "BrowserCore": {
+        "authorization": "Main explicitly authorized coordinated owned verification phase",
+        "initial_command": "uv run --extra http pytest -q tests/test_browser.py tests/test_browser_context.py tests/test_browser_observation.py tests/test_browser_visual.py",
+        "initial_result": "25 passed, 1 failed in 80.14s; actual clipped child leaked through parent scroll target label fallback. Fixed rendered text labels/alerts and user-scrollable-only targets; no failure-only reconfirmation",
+        "final_command": "env BROWSER_AGENT_LIBRARY_PATH=/home/claw/.local/lib/chromium/usr/lib/x86_64-linux-gnu uv run --extra http pytest -q tests/test_browser.py tests/test_browser_context.py tests/test_browser_observation.py tests/test_browser_visual.py",
+        "final_result": "28 passed in 64.16s",
+        "additional_security_regression_command": "env BROWSER_AGENT_LIBRARY_PATH=/home/claw/.local/lib/chromium/usr/lib/x86_64-linux-gnu uv run --extra http pytest -q tests/test_browser_observation.py::test_protected_frame_points_and_unbound_keyboard_rejected",
+        "additional_security_regression_result": "1 passed in 3.87s; actual parent wrapper pointing into data iframe rejected, unbound iframe-focused Tab rejected, allowed parent click still rendered data-clicked=yes",
+        "post_review_command": "env BROWSER_AGENT_LIBRARY_PATH=/home/claw/.local/lib/chromium/usr/lib/x86_64-linux-gnu uv run --extra http pytest -q tests/test_browser_observation.py::test_nontext_drafts_require_reload_approval_and_bind_revision tests/test_browser_observation.py::test_protected_frame_points_and_unbound_keyboard_rejected",
+        "post_review_result": "7 passed in 11.63s after nontext repair; actual local HTTP select/checkbox/radio visible and offscreen deny host-origin no-approval exception; mutations invalidate revisions; protected-input regression remains passing. Prior full28 suite predates this additive review repair; parent coordinated global suite is latest whole-suite authority",
+        "post_review_real_service_smoke": "uv run --extra http python -c <in-memory actual BrowserService dispatch + asyncio local HTTP script>; exit0. Host BROWSER_RECOVERY_POLICY allowlists fixture origin. Offscreen select=second/checkbox=true/radio=true, complete DOM error observation, editable_nonempty=false but unsaved=true: act reload returns approval_required, request count unchanged and all drafts preserved",
+        "real_consumer_command": "uv run --extra http python -c <in-memory asyncio actual HTTP server + BrowserSession consumer script in worker transcript>; explicit BROWSER_AGENT_LIBRARY_PATH set",
+        "real_consumer_result": "Exit0; semantic Search/Home/shadow controls matched independent screenshot, unrelated animation click rendered body data-canvas=yes, changed canvas blocked with 100x80 changed-region diagnostic, hidden protected frame preserved pixels, visible protected frame withheld pixels but retained parent control, slow load timeout retained observable owned tab then cleanup",
+        "public_youtube": "Live https://www.youtube.com/ isolated Chromium Linux logged-out: 12 DOM targets including combobox Search, Search button, YouTube Home, Home, Shorts, Subscriptions, You; 8 rendered text nodes; independent screenshot matches. Coverage partial for a skipped frame (not falsely complete). No video feed rendered: public page says Try searching to get started. Initial post-boxless-only smoke had0targets; measured root/body geometry explained zero-height body overflow propagation; fixed generic root then final smoke12targets",
+        "artifacts": [
+          "/tmp/browser-core-proof-final/report.json",
+          "/tmp/browser-core-proof-final/semantic-independent.png",
+          "/tmp/browser-core-proof-final/semantic-observed.png",
+          "/tmp/browser-core-proof-final/youtube-independent.png",
+          "/tmp/browser-core-proof-final/youtube-observed.png",
+          "/tmp/browser-core-proof-final/nontext-draft-report.json",
+          "/tmp/browser-core-proof-final/nontext-draft-independent.png"
+        ],
+        "artifact_boundary": "Local ephemeral public deterministic/logged-out screenshots only; no screenshots/private page traces in Git",
+        "not_exercised": [
+          "macOS native Chrome",
+          "logged-in Facebook/TikTok",
+          "logged-in YouTube video recommendations",
+          "paid model calls"
+        ]
+      }
+    },
+    "global": {
+      "command": "env BROWSER_AGENT_LIBRARY_PATH=/home/claw/.local/lib/chromium/usr/lib/x86_64-linux-gnu BROWSER_INTEGRATION_TESTS=1 uv run --extra http pytest --basetemp=/tmp/browser-release-final-proof",
+      "outcome": "152 passed in168.66s; wall170.54s; no skips/failures reported",
+      "python": "3.13.12",
+      "pytest": "9.1.1",
+      "source_commit": "317b69b",
+      "evidence_root": "/tmp/browser-release-final-proof"
+    },
+    "build": {
+      "command": "uv build",
+      "outcome": "sdist+wheel built successfully in2.22s",
+      "wheel_sha256": "3cb6112f8a2cd28c93fc1b1b81112f1980ec99a30a698aaff06df7f4b6497e72",
+      "sdist_sha256": "f499c1f3e970e049c12e32656203cfb7817727e178f3c7874df27ca5bbc56325",
+      "resources": "wheel browser_monitor.py,page_state.py,snapshot.js,MCP/HTTP modules+2console entrypoints; sdist portable SKILL.md"
+    },
+    "installed_wheel": {
+      "outcome": "PASS all four consumers in25.73s combined installation+smoke wall time",
+      "package_path": "/tmp/browser-release-wheel-cache/archive-v0/5gGAL_j1Ec7Hulbh/lib/python3.12/site-packages/browser_automation/__init__.py",
+      "environment": "cwd /tmp, secret-stripped env, fresh HOME/UV_CACHE_DIR,36 packages installed, native_consent false, keys absent in doctor",
+      "browser": "real installed Chromium153 isolated/headless with explicit host executable/library overrides",
+      "direct_consumer": "real Query=Ada fill/click WHEEL INPUT Ada, changed before/afterPNG, hidden protected frame main retained, captured503",
+      "HTTP": "official SDK2026-07-28+2025-11-25;21tools each,doctor,launch,newtab,observePNG/state,real guarded click,actual503+opcode1 application socket via six tools,cleanup",
+      "stdio": "official SDK2025-06-18;21tools,actualbrowser and deterministic localHTTP Decisions goal success,3monotonic progress callbacks before final,unknown total omitted",
+      "evidence_root": "/tmp/browser-release-wheel-proof",
+      "paid_provider": false,
+      "personal_profile": false,
+      "tls": false
+    },
+    "authorization": "Main authorized final gate after BrowserCore7PASS nontext/protectedinput plus resolved4IssueFlowReview repairs; global run152PASS at317b69b"
   },
   "limits": [
     "No personal native Chrome profile or macOS available in this Linux environment.",
     "No paid-provider keys; local deterministic HTTP fixture is not live model quality/OCR capability evidence.",
-    "Original Facebook/TikTok reports preserved, no live repaired claim."
+    "Original Facebook/TikTok reports preserved, no live repaired claim.",
+    "WebSocket capture scope explicitly excludes workers and out-of-process child targets; not full-tab inventory.",
+    "Real Chromium CDP omitted protocol ping/pong controls; control_frame_visibility not_guaranteed_by_cdp; text ping/pong are opcode1."
   ],
   "preservation": "doc.md and all issues/*.md unchanged",
-  "docs_status": "Interfaces aligned with owner contracts; verification/evidence finalization awaits all READY and parent authorization."
+  "docs_status": "Final interfaces and all8 evidence mapping aligned; docs/research.md canonical evidence, README/changelog links/summaries; no unsupported full-site/live-profile/model-quality claim.",
+  "review_repairs": {
+    "Surface_navigation_enum": "PASS: schema/CLI3 modes, 831ec79, latest scoped12passed27.32s",
+    "Surface_OMP_diagnostic": "PASS: full safe error content/details; actual worker stale+loader/progress and fault-only changed_region transport regression, 831ec79",
+    "BrowserCore_dirty_forms": "PASS:7tests11.63s and actual no-reload BrowserService preserved select/check/radio visible/offscreen;317b69b",
+    "DecisionState_visual_regions": "PASS: all64grid prioritized under256 cap, explicit region_coverage; dense actual browser/localHTTP fixture, 2165899;60passed10.90s"
+  },
+  "preservation_check": {
+    "command": "git diff --exit-code 5e9b55fa83b736cc5d07632f3cdd8798f4e1c407 -- doc.md issues && git status --short -- doc.md issues",
+    "outcome": "exit0,no output",
+    "scope": "protected tester baseline files unchanged; no private artifacts staged"
+  },
+  "release_commit": "Final documentation/state-only commit hash and successful push are recorded in terminal handoff; self-hash cannot be embedded."
 }

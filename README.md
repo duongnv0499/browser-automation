@@ -182,17 +182,16 @@ CDP can access sensitive data throughout the profile. Models receive selected pa
 
 No matched benchmark against Jev or Codex has been run. Browser-only latency, deterministic local-provider loop latency, and live paid-model end-to-end latency are distinct metrics. Offline provider tests do not prove a paid live API call; an isolated fixture does not prove attachment to a logged-in user profile. See [dated research and evidence boundaries](docs/research.md).
 
-The authorized final unified HTTP/skill gate on **2026-10-09** passed **81 tests in 165.02s** (Python 3.13.12), including real Chromium fixtures, official MCP SDK clients on current `2026-07-28` and legacy `2025-11-25`, the localhost two-hop HTTP proxy, CLI/stdio subprocesses, and installed OMP tool registration:
+The authorized **eight-issue release gate, 2026-10-09**, passed **152 tests in 168.66s** (Python 3.13.12), with no reported skips/failures. It includes real Chromium, official stdio/current+legacy HTTP consumers, cancellation/progress, HTTP/WebSocket events, recovery policy/draft preservation, target-local visual guards, CLI and actual OMP loader/callbacks:
 
 ```bash
 BROWSER_AGENT_LIBRARY_PATH=/home/claw/.local/lib/chromium/usr/lib/x86_64-linux-gnu \
-  BROWSER_INTEGRATION_TESTS=1 uv run --extra http pytest --basetemp=/tmp/browser-http-final-proof
+  BROWSER_INTEGRATION_TESTS=1 uv run --extra http pytest --basetemp=/tmp/browser-release-final-proof
 uv build
-# Clean installed-wheel doctor/HTTP startup commands and evidence: docs/research.md
 ```
 
-The library path above is this verification host's explicit browser dependency configuration, not a portable installation default. `uv build` produced the 0.1.0 sdist/wheel; archive inspection confirmed the portable skill in the sdist and `snapshot.js` plus HTTP module/entrypoints in the wheel. A clean installed-wheel environment outside the checkout passed CLI doctor and actual installed HTTP startup with official SDK modern/legacy tool listing and doctor (no keys/native consent). Installed-wheel browser launch was not exercised. The reference skill validator passed, and actual installed Codex discovered the skill through a temporary project symlink without a paid model turn. Neither this nor SDK HTTP checks claim a Codex/Claude model invoked HTTP tools. Nginx/TLS setup remains documentation-only; the exercised proxy was plain localhost HTTP.
+The host library path is explicit verification configuration, not a portable default. `uv build` packaged the new monitor/state modules and snapshot; a clean installed wheel outside the checkout actually launched Chromium, produced changed rendered PNGs, captured HTTP503/socket events over modern+legacy HTTP (21 tools), and delivered three stdio progress updates before independently verified success using a **local deterministic HTTP provider**, not a paid model. Earlier skill validation/actual Codex discovery remain recorded historical checks.
 
-Exact commands, artifact paths, checksums, measurements, and the pushed implementation commit ledger are in [research evidence](docs/research.md). No live Luna keys were available; no personal Chrome profile was attached or hijacked. Controlled attached-browser fixtures prove preservation of fixture tabs/cookies, not access to a user's logged-in profile. Headed-desktop behavior and matched Jev/Codex comparisons remain unverified.
+[All eight acceptance mappings, exact commands, intermediate failures/repairs, artifacts, checksums and limits](docs/research.md#eight-issue-release-gate--2026-10-09) are in research. A real logged-out Linux YouTube page returned 12 semantic targets matching its screenshot, with **partial** frame coverage and no video feed. This does not prove logged-in YouTube/Facebook/TikTok, personal native Chrome/macOS, headed desktop, live OCR/model quality, public TLS or benchmark superiority. Original tester reports and `doc.md` remain unchanged.
 
 See [AGENTS.md](AGENTS.md), [worker instructions](agents/worker-instructions.md), [durable workstreams](agents/workstreams.json), and [changelog](CHANGELOG.md). Preserve the user's `doc.md`. Workers implement scoped features; the parent manages/reviews; the active GitOwner in workstreams serializes exact-path feature commits and pushes.

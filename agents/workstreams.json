@@ -290,7 +290,7 @@
   },
   "resume": "Re-read AGENTS.md, this file, own state, and current owned source; retain scope/research/security/verification/commit rules.",
   "release_issues_2026_10_09": {
-    "phase": "implementation; no checks authorized yet",
+    "phase": "complete: all eight local acceptance flows verified; release documentation/state ready for final commit/push",
     "tracker": "agents/release-issues.json",
     "ownership": {
       "BrowserCore": [
@@ -357,6 +357,14 @@
       "No native personal-profile or paid provider credentials currently available; deterministic HTTP providers must be labeled.",
       "Commit feature-sized implementation milestones first, review fixes then evidence; exact owned paths only.",
       "No secrets/profiles/private screenshots in Git; no live FB/TikTok/macOS/YouTube claim without actual evidence."
-    ]
+    ],
+    "contracts_file": "agents/release-issues.json",
+    "verification_summary": "152passed168.66s no skips/failures; uvbuild2.22s; clean installed-wheel actual browser+modern/legacyHTTP monitor+stdio progress PASS25.73s; no paid/native/macOS proof"
+  },
+  "current_phase": {
+    "feature": "eight tester issues 2026-10-09",
+    "phase": "complete: all eight local acceptance flows verified; release documentation/state ready for final commit/push",
+    "active_tracker": "agents/release-issues.json",
+    "historical_sections": "harness_state, parent_phase, http_skill_feature, agent_install_feature describe earlier completed releases, not this issue cutover"
   }
 }

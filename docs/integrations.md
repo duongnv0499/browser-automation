@@ -47,7 +47,7 @@ Use fresh observations after actions. Stale/covered/wrong-tab/unsupported action
 
 ### Bounded navigation and semantic observation
 
-`new_tab` accepts `wait_until` (`commit`, `domcontentloaded`, `load`, `networkidle`) and `timeout_ms` (1–120000, default 15000). A bounded timeout returns the owned tab ID and `navigation_status: "timeout"`, not a closed uninspectable tab. Retain it, observe the rendered page, and explicitly close owned work when appropriate; never infer a site's blocking cause from a timeout alone.
+`new_tab` accepts `wait_until` (`commit`, `domcontentloaded`, `load`) and `timeout_ms` (1–120000, default 15000). A bounded timeout returns the owned tab ID and `navigation_status: "timeout"`, not a closed uninspectable tab. Retain it, observe the rendered page, and explicitly close owned work when appropriate; never infer a site's blocking cause from a timeout alone. `networkidle` is not accepted.
 
 `observe` adds `coverage` and DOM-derived `page_state`; `truncated: false` does not mean every rendered semantic control was collected. `interpret_visual: true` explicitly requests a screenshot plus paid multimodal interpretation (`provider`/`model` optional); it is not the same as merely capturing `screenshot: true`. DOM/vision provenance remains separate and provider failure is explicit. [Recovery policy](providers.md#operator-controlled-recovery) is host-only: snapshot-bound `reload` defaults to exact approval; a button's Refresh label grants no authority.
 
@@ -69,7 +69,7 @@ JSONL opts in with a top-level `"progress": true` on the request. Interim `{"id"
 
 ## MCP stdio
 
-The MCP server supports initialization, version negotiation, tools/list, tools/call, ping, cancellation, and EOF cleanup. Its tools mirror the CLI commands above plus `doctor`, `tabs`, `close_tab`, `run`, `upload`, `download`, `connect_default`. `observe` returns compact structured/text metadata and screenshot in a separate `image/png` MCP image block, not a base64 string stuffed into text. Tool failures use `isError` with structured `error`; JSON-RPC failures use protocol errors.
+The MCP server supports initialization, version negotiation, tools/list, tools/call, ping, cancellation, and EOF cleanup. Its **21 tools** mirror the persistent CLI surface, including `doctor`, `tabs`, `close_tab`, `run`, `upload`, `download`, `connect_default` and six network/WebSocket start/list/stop tools. `observe` returns compact structured/text metadata and screenshot in a separate `image/png` MCP image block, not a base64 string stuffed into text. Tool failures use `isError` with structured `error`; JSON-RPC failures use protocol errors.
 
 Use absolute paths and do not put API keys directly into checked-in configuration. Primary sources: [Codex MCP](https://developers.openai.com/codex/mcp), [Claude Code MCP](https://code.claude.com/docs/en/mcp), [Hermes MCP](https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp).
 
@@ -175,6 +175,10 @@ Inside OMP, `/browser-agent-doctor` executes the same registered browser tool ag
 
 
 The package must be installed in that interpreter (`uv sync` from this repository does so). Configure native consent/provider keys on the host. Extension results separate screenshot image content from JSON text. Session shutdown ends worker stdin for cleanup. This integrates this project's own tools; it does **not** reuse or emulate OMP's private browser runtime, and does not claim performance superiority over OMP/Codex/Jev. If extension loading is unavailable on another OMP release, use its shell tool to start the documented persistent worker and keep the process stdin/stdout alive; repeated one-shot shell commands do not preserve browser identities.
+
+The registered tool's fourth `execute` argument is the public OMP `onUpdate` callback. With it, the bridge requests JSONL progress and forwards bounded intermediate semantic events while retaining the pending request until its final result/error; interim frames never masquerade as completion. Cancellation uses the original request ID and does not terminate unrelated sessions. This is the OMP stdio bridge, not inferred HTTP support. Primary reference accessed 2026-10-09: [OMP extensions contract](https://raw.githubusercontent.com/can1357/oh-my-pi/main/docs/extensions.md).
+
+JSONL worker guard errors are returned as a structured OMP tool result with `status: "error"` and the full safe `error` object, in both text content and `details.error`; they are not reduced to a thrown message-only exception. Changed-region and `recommended_next_action` diagnostics remain available to the parent. Recommendations never authorize replay or relax the snapshot guard.
 
 ## Reproducing integration verification
 
