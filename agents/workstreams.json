@@ -1,7 +1,7 @@
 {
-  "goal": "Production-usable Python browser automation with explicit native Chrome consent or isolated launch, OpenRouter-primary/OpenAI Decisions, guarded observation/control, CLI/MCP and available OMP integration.",
+  "goal": "Production browser automation plus real DevTools-equivalent request queries, headers, payloads and response bodies, context-authenticated internal API calls/replays and explicit multiple-tab workflows across CLI/MCP stdio/HTTP/OMP.",
   "parent_role": "Research initially; then PM, architecture and review only. Workers implement and repair owned paths.",
-  "git_owner": "ReleaseDocs exclusively stages exact owner-approved paths, commits and pushes origin/main serially; no git add ., force/reset, or unrelated user paths.",
+  "git_owner": "NetworkDocs exclusively stages exact owner-approved paths, commits and pushes origin/main serially; no git add ., force/reset, or unrelated user paths.",
   "verification_gate": "All workers READY first; parent authorizes unified checks. No mid-flight tests/builds/lint/smokes.",
   "ownership": {
     "Harness": [
@@ -362,9 +362,9 @@
     "verification_summary": "152passed168.66s no skips/failures; uvbuild2.22s; clean installed-wheel actual browser+modern/legacyHTTP monitor+stdio progress PASS25.73s; no paid/native/macOS proof"
   },
   "current_phase": {
-    "feature": "eight tester issues 2026-10-09",
-    "phase": "complete: all eight local acceptance flows verified; release documentation/state ready for final commit/push",
-    "active_tracker": "agents/release-issues.json",
-    "historical_sections": "harness_state, parent_phase, http_skill_feature, agent_install_feature describe earlier completed releases, not this issue cutover"
+    "feature": "network DevTools capabilities 2026-10-09",
+    "phase": "workers implementing capture details, context replay/call, client surfaces and aligned documentation; all READY before parent-authorized checks",
+    "active_tracker": "agents/network-devtools.json",
+    "historical_sections": "Earlier release sections and counts remain historical evidence, not acceptance of the current network cutover"
   }
 }

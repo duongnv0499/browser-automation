@@ -1,0 +1,29 @@
+{
+  "goal": "Real DevTools-equivalent request queries, headers, payloads and response bodies; approved internal API call/replay in the logged-in browser context; explicit multiple existing/future tabs across CLI, MCP stdio/HTTP and OMP.",
+  "date": "2026-10-09",
+  "parent_role": "Initial primary research completed; PM, architect and reviewer only. Owning workers implement and repair.",
+  "git_owner": "NetworkDocs exclusively stages exact approved owned paths, commits feature-sized milestones and pushes origin/main serially; never git add ., force/reset or unrelated paths.",
+  "owners": {
+    "CaptureDetails": ["src/browser_automation/browser_monitor.py", "src/browser_automation/browser_network_data.py"],
+    "ReplayEngine": ["src/browser_automation/browser_requests.py", "src/browser_automation/browser.py"],
+    "AgentSurface": ["src/browser_automation/service.py", "src/browser_automation/mcp.py", "src/browser_automation/mcp_http.py", "src/browser_automation/cli.py", "integrations/", "pyproject.toml", ".env.example"],
+    "NetworkDocs": ["docs/network.md", "README.md", "docs/browser.md", "docs/integrations.md", "docs/http.md", "docs/research.md", "docs/architecture.md", "CHANGELOG.md", "install.md", "skills/browser-automation/SKILL.md", "agents/workstreams.json", "agents/network-devtools.json"]
+  },
+  "contracts": {
+    "capture": "Passive page-scoped listeners before interaction; immutable capture-generation request IDs; detail/body field selection and byte-offset chunking with explicit unavailable/loss metadata. Private raw replay source is not implicitly exported.",
+    "privacy": "Sanitized ordinary query/header/structured body data by default; include_sensitive requires explicit caller flag plus BROWSER_NETWORK_SENSITIVE=1 host consent; best-effort redaction is not a secrecy guarantee.",
+    "execution": "Existing page.context.request cookie jar, provenance browser_context_api_request, never claimed page fetch/CORS or page Network event. Any authorized HTTP(S) URL/method; Surface automatically executes same-origin GET/HEAD/OPTIONS without body, explicit credential edits or consequential-looking path/query. Other plans require exact host approval; host BROWSER_NETWORK_REQUIRE_APPROVAL=1 requires approval for all calls. No automatic retries or cross-origin captured credential forwarding.",
+    "approval": "prepare_only allows inspection without dispatch. Private engine derives safety; caller cannot approve itself. network_execute consumes expiring one-use exact plan approval bound session/tab/source/destination/method/body digest. Safe-read foreign-origin redirects return redirect_reapproval_required without contacting new origin. HTTP safe semantics and naming heuristics are not a guarantee that a server implements GET safely. Cancelled dispatched outcomes may be unknown; no automatic replay.",
+    "multi_tab": "Explicit existing tabs and opt-in future pages/popups; per-tab captures/cursors/errors and protected URL checks, no single-tab cage or browser-wide completeness claim.",
+    "resources": "Bounded configurable request/body storage and inbound/outbound sizes; transparent loss and APIResponse disposal on eviction/close. Protected local URLs, native consent, authentication and permissions remain enforced."
+  },
+  "lifecycle": {
+    "phase": "implementation; documentation interfaces awaiting owner final schema",
+    "ready_gate": "All workers READY, then parent authorizes coordinated scoped checks. No worker tests/build/lint/format/smoke mid-flight.",
+    "release_gate": "After stable scoped PASS parent authorizes final full suite/build and clean installed-wheel real browser plus official SDK stdio/current+legacy HTTP, CLI and actual OMP consumers; parent independently opens rendered output/screenshots.",
+    "compaction": "Re-read AGENTS.md, agents/workstreams.json, this tracker, owning state and changed owned source; persist contracts/ownership/blockers, never trust chat memory alone.",
+    "preserved": ["doc.md", "issues/", "installed client configuration", "credentials", "native profiles", "private screenshots/traces"]
+  },
+  "evidence": {"new_feature_checks": "Not yet authorized or executed; prior 152-test release evidence is historical, not proof of this feature.", "credentials": "No paid model credentials or personal native profile; disposable cookie-authenticated Chromium fixtures do not prove a real user's account."},
+  "commits": []
+}
