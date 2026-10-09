@@ -100,6 +100,9 @@ def reload_approval_reason(observation: dict, policy: dict | None = None) -> str
     for e in observation.get("elements", []):
         if e.get("sensitive") or ("fill" in e.get("operations", []) and str(e.get("value") or "")) or e.get("input_type") == "password":
             risky = True
+        if "select" in e.get("operations", []) or e.get("role") in {"combobox", "listbox", "checkbox", "radio"} or e.get("input_type") in {"checkbox", "radio"}:
+            # Cached/older observations lacking document-wide safety flags are not proof of clean form state.
+            risky = True
     if risky:
         return "Reload may discard nonempty editable, sensitive, or unsaved data. " + WARNING
     rendered_error = any(e.get("kind") == "rendered_text_match" for e in dom["evidence"])

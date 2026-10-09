@@ -81,7 +81,9 @@ async def test_real_viewport_local_http_visual_recovery_consumer(tmp_path):
             pass
 
         def do_GET(self):
-            body = b'<!doctype html><title>Canvas evidence fixture</title><canvas width="500" height="150"></canvas><script>const c=document.querySelector("canvas").getContext("2d");c.font="48px sans-serif";c.fillText("RECONNECT ZEBRA",20,80);</script>'
+            body = (b'<!doctype html><title>Canvas evidence fixture</title><canvas width="500" height="150"></canvas><div style="display:grid;grid-template-columns:repeat(30,22px);gap:1px">'
+                    + b''.join(f'<button aria-label="Item {i}" style="width:22px;height:20px">.</button>'.encode() for i in range(300))
+                    + b'</div><script>const c=document.querySelector("canvas").getContext("2d");c.font="48px sans-serif";c.fillText("RECONNECT ZEBRA",20,80);</script>')
             self.send_response(200)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -121,6 +123,13 @@ async def test_real_viewport_local_http_visual_recovery_consumer(tmp_path):
         observed = result["observation"]
         assert "RECONNECT ZEBRA" not in observed["text"]
         assert observed["visual_summary"]["visible_text"] == ["RECONNECT ZEBRA"]
+        offered_regions = json.loads(records[0]["messages"][1]["content"][0]["text"].split("Observed region identities: ")[1])
+        grid_ids = {e["id"] for e in observed["elements"] if e["role"] == "visual-region"}
+        assert len(grid_ids) == 64
+        assert grid_ids <= {r["target"] for r in offered_regions}
+        assert observed["visual_summary"]["regions"][0]["target"] in grid_ids
+        coverage = observed["visual_summary"]["region_coverage"]
+        assert coverage["total"] > 256 and coverage["offered"] == 256 and coverage["omitted"] > 0
         assert observed["page_state"]["recovery_candidates"][0]["approval_required"] is True
         assert events[0]["page_state"]["recovery_available"] and events[1]["checkpoint"] == "needs_user"
         assert "RECONNECT ZEBRA" not in json.dumps(records[0])  # unprimed arbitrary visual readback request
@@ -165,4 +174,15 @@ def test_accessible_only_error_label_cannot_waive_reload_approval(role):
         assert result["evidence"][0]["kind"] == "accessible_control_label_match"
     else:
         assert result["state"] == "ready"
+
+
+
+@pytest.mark.parametrize("element", [
+    {"id": "select", "role": "combobox", "operations": ["select"], "selected_values": ["changed"]},
+    {"id": "checkbox", "role": "checkbox", "input_type": "checkbox", "checked": True},
+    {"id": "radio", "role": "radio", "input_type": "radio", "checked": False},
+])
+def test_nontext_form_controls_require_reload_approval_without_safety_metadata(element):
+    assert reload_approval_reason(page(elements=[element]),
+        {"reload_without_approval_origins": ["https://fixture.test"]}) is not None
 

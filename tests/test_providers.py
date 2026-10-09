@@ -219,3 +219,30 @@ async def test_unprimed_visual_text_transport_and_region_validation(recording_se
     finally:
         await client.close()
 
+
+
+@pytest.mark.asyncio
+async def test_dense_dom_retains_all_visual_grid_and_reports_region_omission(recording_server):
+    url, records, state = recording_server
+    bounds = {"x": 0, "y": 0, "width": 10, "height": 10}
+    observed = {"id": "dense", "screenshot": PNG, "elements": [
+        {"id": f"dom{i}", "role": "button", "bounds": bounds} for i in range(2000)]
+        + [{"id": "canvas", "role": "canvas", "bounds": bounds}]
+        + [{"id": f"grid{i}", "role": "visual-region", "bounds": bounds} for i in range(64)]}
+    state["visual_result"] = {"state": "error", "summary": "Deterministic arbitrary visual label", "visible_text": ["ZEBRA"],
+        "region_targets": ["grid63"], "recovery_recommended": True, "self_reported_confidence": .7, "refusal": False}
+    client = DecisionProvider(api_key="deterministic-local-only", text_endpoint=url + "/chat")
+    try:
+        result = await client.interpret_visual(observed)
+        prompt = records[0][1]["messages"][1]["content"][0]["text"]
+        regions = json.loads(prompt.split("Observed region identities: ")[1])
+        ids = {r["target"] for r in regions}
+        assert {f"grid{i}" for i in range(64)} <= ids and "canvas" in ids
+        assert result["regions"][0]["target"] == "grid63"
+        assert result["region_coverage"] == {"total": 2065, "offered": 256, "omitted": 1809,
+            "limit": 256, "priority": "screenshot_grid_then_visual_then_dom"}
+        assert '"omitted": 1809' in prompt
+        assert "ZEBRA" not in prompt
+    finally:
+        await client.close()
+
