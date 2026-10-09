@@ -22,7 +22,9 @@ INSTRUCTIONS = (
     "approval for all calls. Other plans pause for exact host approval via network_execute. "
     "prepare_only never sends. Sensitive export needs explicit host consent; redaction is "
     "best effort and selected data reaches the client/model. API responses are not rendered "
-    "UI verification. Close owned sessions when done."
+    "UI verification. After cancellation, use network_calls with tab_id and optional plan_id "
+    "to recover issued request IDs and inspect unknown outcomes; never retry automatically. "
+    "Close owned sessions when done."
 )
 
 
@@ -97,6 +99,7 @@ TOOLS.extend([
     ("network_stop_many", "Stop selected or all session captures and future-tab capture.", schema({**SESSION, "tab_ids": TAB_IDS}, tuple(SESSION))),
     ("network_detail", "Read selected captured request/response fields, including query, headers and body availability. Sensitive fields require include_sensitive and host consent; redaction is best effort.", schema({**TAB, "request_id": S, "fields": {"type": "array", "items": S}, "include_sensitive": B}, (*TAB, "request_id"))),
     ("network_body", "Read request/response text or base64 binary chunks with offsets, completeness and loss diagnostics. Sensitive disclosure needs host consent.", schema({**TAB, "request_id": S, "part": {"type": "string", "enum": ["request", "response"]}, "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 1048576}, "include_sensitive": B}, (*TAB, "request_id"))),
+    ("network_calls", "List bounded sanitized browser-context API request outcomes for this tab, optionally by plan_id. After cancellation recover request_id/status/unavailable_reason, then read details/body; never retry an unknown outcome automatically.", schema({**TAB, "plan_id": S, "cursor": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 1000}}, tuple(TAB))),
     ("network_call", "Call any authorized HTTP(S) method/endpoint in the target tab's cookie context. Safe same-origin reads execute directly; consequential/foreign requests pause for exact host approval. prepare_only inspects without sending. API outcomes are not UI verification.", schema({**TAB, **REQUEST_OPTIONS}, (*TAB, "url"))),
     ("network_replay", "Replay an immutable captured request with edits and optional target tab. Safe same-origin reads execute directly; other requests need exact host approval. Cross-origin edits drop captured credentials; prepare_only never sends.", schema({**TAB, "request_id": S, "target_tab_id": S, **REQUEST_OPTIONS}, (*TAB, "request_id"))),
     ("network_execute", "Execute a prepared exact network plan once with a host-issued approval token. Tokens cannot be minted by tools; no automatic retry.", schema({**SESSION, "plan_id": S, "approval_token": S}, (*SESSION, "plan_id", "approval_token"))),

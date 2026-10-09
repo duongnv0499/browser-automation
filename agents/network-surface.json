@@ -1,20 +1,23 @@
 {
   "owner": "AgentSurface",
-  "phase": "Scoped verification PASS; READY for parent full-suite gate",
+  "phase": "Lifecycle repair scoped PASS; READY for parent global gate",
   "owned_paths": ["src/browser_automation/service.py", "src/browser_automation/mcp.py", "src/browser_automation/mcp_http.py", "src/browser_automation/cli.py", "integrations/omp/browser-tools.mjs", "pyproject.toml", "uv.lock", ".env.example", "tests/test_network_surface.py", "tests/test_service_omp.py", "agents/network-surface.json"],
   "contracts": {
-    "catalog": "29 tools: prior21 plus network_start_many,list_many,stop_many,detail,body,call,replay,execute",
-    "executor": "ReplayEngine prepares all calls/replays; trusted engine determines approval_required. Service privately executes safe reads unless prepare_only; otherwise exact service/session binding stored for five-minute one-use host approval. network_plan returns immutable sanitized binding.",
+    "catalog": "Shared dynamic catalog exposes existing tools plus multi-tab capture/detail/body/call/replay/execute and network_calls recovery; tests assert required names and uniqueness, not fixed counts.",
+    "executor": "Executor alone owns immutable prepared-plan TTL/capacity/one-use lifecycle. Service reconstructs exact session-bound binding from trusted network_plan preflight before _approve; no redundant pending_network ledger or silent eviction.",
     "sensitive": "include_sensitive requires BROWSER_NETWORK_SENSITIVE=1; provider/client receives selected data. Redaction best effort.",
     "transport": "stdio, JSONL CLI, modern and legacy authenticated HTTP reuse shared TOOLS validation and BrowserService; OMP commands updated.",
-    "body": "Host limits BROWSER_NETWORK_BODY_LIMIT, BROWSER_NETWORK_CACHE_LIMIT, BROWSER_NETWORK_BODY_TIMEOUT_MS. Body chunks expose source/export byte totals and explicit loss."
+    "body": "Host limits BROWSER_NETWORK_BODY_LIMIT, BROWSER_NETWORK_CACHE_LIMIT, BROWSER_NETWORK_BODY_TIMEOUT_MS. Body chunks expose source/export byte totals and explicit loss.",
+    "issued_recovery": "network_calls(tab_id,plan_id=None,cursor=0,limit=100) returns bounded sanitized calls[] with issued request_id and cancelled_unknown_outcome; standard detail/body then inspect. No implicit retries."
   },
   "verification": "Parent-authorized real-browser scoped run: network_surface.py/service_omp.py/service.py/agent_surface.py: 43 passed in 60.48s. After adding genuine request-response comparison and independent sanitized artifacts/screenshots, modified network_surface.py: 9 passed in 32.66s. After engine host-review preview addition, added semantic body/header preview assertions and reran four public workflow cases: 4 passed, 5 deselected in 35.51s. All used BROWSER_INTEGRATION_TESTS=1 and explicit Chromium library directory with uv run --extra http pytest.",
+  "lifecycle_verification": "After removing redundant service plan ledger and exposing network_calls, parent-authorized network_surface.py/service_omp.py/service.py run: 42 passed in 63.39s. Added explicit free-capacity reuse and genuine OMP AbortController cancellation recovery; targeted changed four capacity cases plus new OMP case: 5 passed, 17 deselected in 17.17s. Each canceled fixture POST reached server exactly once, recovered request_id/unknown-outcome detail/body, and retained session. 129 preparations sent zero requests; oldest plan remained executable and freed capacity for replacement.",
   "new_acceptance_consumers": "Official SDK stdio/modern+legacy HTTP and CLI: genuine two-tab+popup capture, query/header/body redaction and host-sensitive disclosure, binary chunks, browser cookies and SetCookie updates, exact same-origin POST replay into second tab, foreign-origin credential stripping, expired/wrong/one-use host tokens, no send before approval, HTTP503 single request, capture restart rejection, principal isolation. OMP real extension worker cookie/binary/two-tab/approval consumer plus installed OMP loader catalog description.",
   "intentionally_unchanged": "mcp_http.py and cli.py already dynamically consume shared catalog/BrowserService; pyproject.toml and uv.lock need no new dependency. Documentation owned by NetworkDocs.",
   "parent_checks": "BROWSER_INTEGRATION_TESTS=1 uv run --extra http pytest tests/test_network_surface.py tests/test_service_omp.py tests/test_agent_surface.py tests/test_service.py tests/test_mcp_http.py tests/test_mcp_http_browser.py; full-suite/build only coordinated by parent.",
   "artifact_directory": "/tmp/browser-network-surface-evidence",
   "latest_workflow_artifact_directory": "/tmp/browser-network-surface-preview-evidence",
+  "lifecycle_artifact_directories": ["/tmp/browser-network-surface-lifecycle-evidence", "/tmp/browser-network-surface-final-lifecycle-evidence"],
   "artifact_contents": "Four public-transport independent PNG screenshots, four sanitized local-server groundtruth JSON summaries, and four foreign-origin consent/disclosure summaries. Contains fixture data only, not Git artifacts. No live model or personal profile claims.",
   "research": ["https://playwright.dev/python/docs/api/class-apirequestcontext", "https://developer.mozilla.org/en-US/docs/Glossary/Safe/HTTP"],
   "research_access_date": "2026-10-09"

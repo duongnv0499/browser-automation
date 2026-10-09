@@ -32,7 +32,7 @@ async def test_actual_omp_extension_load(tmp_path):
                 if "browser_extension_probe" in frame:
                     assert frame["browser_extension_probe"]["name"] == "browser_agent"
                     catalog = json.dumps(frame["browser_extension_probe"])
-                    for name in ("network_detail", "network_body", "network_call", "network_replay", "network_execute", "network_start_many", "network_list_many", "network_stop_many"):
+                    for name in ("network_detail", "network_body", "network_calls", "network_call", "network_replay", "network_execute", "network_start_many", "network_list_many", "network_stop_many"):
                         assert name in catalog, catalog
                     break
             process.stdin.write((json.dumps({"id": "doctor-proof", "type": "prompt", "message": "/browser-agent-doctor"}) + "\n").encode())
@@ -148,7 +148,7 @@ const invoke = async (command, arguments_) => {
  return result.details;
 };
 try {
- if(commands.length!==29)throw new Error("Wrong command catalog");
+ for(const name of ["network_calls","network_detail","network_body","network_call","network_execute"])if(!commands.includes(name))throw new Error("Missing network command "+name);
  const opened=await invoke("launch",{headless:true});
  const first=await invoke("new_tab",{session_id:opened.session_id,url:process.env.FIXTURE_ORIGIN});
  const second=await invoke("new_tab",{session_id:opened.session_id,url:process.env.FIXTURE_ORIGIN});
@@ -172,3 +172,60 @@ try {
         binary = [request for request in seen if request["target"] == "/binary"]
         assert len(binary) == 1 and "fixture_session=private-cookie" in binary[0]["headers"]["cookie"]
         assert not any(request["method"] == "POST" for request in seen)
+
+
+async def test_omp_cancelled_network_request_recovered_through_same_worker(tmp_path):
+    from test_network_surface import network_site
+    extension = Path(__file__).resolve().parents[1] / "integrations/omp/browser-tools.mjs"
+    approvals = tmp_path / "approvals.json"
+    approvals.write_text("[]")
+    async with network_site() as (origin, seen):
+        script = tmp_path / "cancel-network-consumer.mjs"
+        script.write_text('''import extension from ''' + json.dumps(extension.as_uri()) + ''';
+import {writeFile} from "node:fs/promises";
+const chain=new Proxy(()=>{}, {get:()=>chain,apply:()=>chain});
+let tool;let shutdown;
+extension({zod:chain,registerTool(value){tool=value;},registerCommand(){},on(name,callback){if(name==="session_shutdown")shutdown=callback;}});
+const invoke=async(command,args,signal)=>{
+ const result=await tool.execute("cancel-"+command,{command,arguments:args},signal);
+ if(result.details.status==="error")throw new Error(JSON.stringify(result.details));
+ return result.details;
+};
+try{
+ const sid=(await invoke("launch",{headless:true})).session_id;
+ const tab=(await invoke("new_tab",{session_id:sid,url:process.env.FIXTURE_ORIGIN})).tab.id;
+ const args={session_id:sid,tab_id:tab};
+ const plan=await invoke("network_call",{...args,url:process.env.FIXTURE_ORIGIN+"/slow",method:"POST",body:"omp-cancelled-outcome"});
+ // Trusted host-fixture approval setup, never a model-facing minting tool.
+ await writeFile(process.env.BROWSER_APPROVALS_FILE,JSON.stringify([{token:"omp-host",binding:plan.binding,expires_at:Date.now()/1000+60}]),{mode:0o600});
+ const controller=new AbortController();
+ const task=invoke("network_execute",{session_id:sid,plan_id:plan.plan_id,approval_token:"omp-host"},controller.signal);
+ for(let attempt=0;attempt<100;attempt++){
+  const receipt=await (await fetch(process.env.FIXTURE_ORIGIN+"/seen-slow")).json();
+  if(receipt.slow_seen)break;
+  await new Promise(resolve=>setTimeout(resolve,10));
+  if(attempt===99)throw new Error("Server did not observe request before cancellation");
+ }
+ controller.abort();
+ let cancelled=false;try{await task;}catch(error){cancelled=error.message.includes("Cancelled");}
+ if(!cancelled)throw new Error("OMP abort did not cancel public callback");
+ const inventory=await invoke("network_calls",{...args,plan_id:plan.plan_id});
+ const record=inventory.calls[0];
+ if(inventory.calls.length!==1 || record.unavailable_reason!=="cancelled_unknown_outcome")throw new Error("Lost issued outcome "+JSON.stringify(inventory));
+ const body=await invoke("network_body",{...args,request_id:record.request_id});
+ if(body.unavailable_reason!=="cancelled_unknown_outcome")throw new Error("Outcome body inaccessible");
+ await invoke("network_detail",{...args,request_id:record.request_id});
+ const tabs=await invoke("tabs",{session_id:sid});
+ if(!tabs.tabs.some(value=>value.id===tab))throw new Error("Abort killed worker session");
+ await new Promise(resolve=>setTimeout(resolve,1100));
+ await invoke("close",{session_id:sid});
+ console.log(JSON.stringify({request_id:record.request_id,plan_id:plan.plan_id,unavailable_reason:record.unavailable_reason,session_retained:true}));
+}finally{shutdown();}
+''')
+        process = await asyncio.create_subprocess_exec("node", str(script), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env={**os.environ, "BROWSER_AGENT_PYTHON": sys.executable, "BROWSER_APPROVALS_FILE": str(approvals), "FIXTURE_ORIGIN": origin})
+        output, errors = await asyncio.wait_for(process.communicate(), 45)
+        assert process.returncode == 0, errors.decode()
+        result = json.loads(output)
+        result["server_post_requests"] = sum(item["method"] == "POST" and item["target"] == "/slow" for item in seen)
+        assert result["server_post_requests"] == 1 and result["session_retained"]
+        (tmp_path / "omp-cancellation-groundtruth.json").write_text(json.dumps(result, indent=2))

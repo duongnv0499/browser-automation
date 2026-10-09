@@ -52,7 +52,6 @@ class BrowserService:
         self.approvals_file = os.environ.get("BROWSER_APPROVALS_FILE")
         self.files_directory = os.environ.get("BROWSER_FILES_DIRECTORY")
         self.pending_actions: dict[tuple[str, str, str], dict] = {}
-        self.pending_network: OrderedDict[tuple[str, str], dict] = OrderedDict()
         from .page_state import recovery_policy_from_env
         self.recovery_policy = recovery_policy_from_env()
 
@@ -110,7 +109,7 @@ class BrowserService:
             browser = self.sessions.get(sid)
             if browser is None:
                 raise ServiceError("unknown_session", "Session has closed")
-            if command in {"observe", "act", "approved_act", "run", "upload", "download", "network_start", "network_list", "network_stop", "network_detail", "network_body", "network_call", "network_replay", "websocket_start", "websocket_list", "websocket_stop"}:
+            if command in {"observe", "act", "approved_act", "run", "upload", "download", "network_start", "network_list", "network_stop", "network_detail", "network_body", "network_calls", "network_call", "network_replay", "websocket_start", "websocket_list", "websocket_stop"}:
                 web_url(await browser.tab_url(args["tab_id"]))
             if command == "tabs":
                 return {"tabs": await browser.tabs()}
@@ -237,7 +236,7 @@ class BrowserService:
                 finally:
                     with anyio.move_on_after(5, shield=True):
                         await provider.close()
-            if command in {"network_detail", "network_body"}:
+            if command in {"network_detail", "network_body", "network_calls"}:
                 if args.get("include_sensitive", False) and os.environ.get("BROWSER_NETWORK_SENSITIVE") != "1":
                     raise ServiceError("host_policy_required", "Sensitive network disclosure requires host BROWSER_NETWORK_SENSITIVE=1; selected data is returned to the calling client/model")
                 tab_id = args.pop("tab_id")
@@ -254,27 +253,15 @@ class BrowserService:
                     return await browser.network_execute(plan["plan_id"], approved=True)
                 review = await browser.network_plan(plan["plan_id"])
                 binding = {"session_id": sid, "operation": "network_execute", **review["binding"]}
-                key = (sid, plan["plan_id"])
-                self.pending_network[key] = {"binding": binding, "expires_at": plan["expires_at"]}
-                while len(self.pending_network) > 128:
-                    self.pending_network.popitem(last=False)
                 return {**plan, "binding": binding,
                         "host_command": "browser-agent approve --binding-file binding.json --approval-file /path/to/approvals.json",
                         "resume_tool": "network_execute"}
             if command == "network_execute":
-                key = (sid, args["plan_id"])
-                pending = self.pending_network.get(key)
-                if pending is None or pending["expires_at"] <= time.time():
-                    self.pending_network.pop(key, None)
-                    raise ServiceError("approval_expired", "Network plan expired, consumed, or belongs to another session; prepare the request again")
                 review = await browser.network_plan(args["plan_id"])
                 binding = {"session_id": sid, "operation": "network_execute", **review["binding"]}
                 web_url(await browser.tab_url(binding["target_tab_id"]))
-                if binding != pending["binding"]:
-                    raise ServiceError("plan_changed", "Network plan no longer matches the reviewed request; prepare again")
                 if not self._approve(binding, args["approval_token"]):
                     raise ServiceError("approval_required", "Exact host approval token required for this network plan")
-                del self.pending_network[key]
                 return await browser.network_execute(args["plan_id"], approved=True)
             if command in {"network_start", "network_list", "network_stop", "websocket_start", "websocket_list", "websocket_stop"}:
                 kind, operation = command.split("_")
@@ -296,9 +283,6 @@ class BrowserService:
                 for key in list(self.pending_actions):
                     if key[0] == sid:
                         del self.pending_actions[key]
-                for key in list(self.pending_network):
-                    if key[0] == sid:
-                        del self.pending_network[key]
                 return {"closed": sid}
             raise ServiceError("unknown_command", f"Unknown command: {command}")
 
@@ -316,7 +300,6 @@ class BrowserService:
                         self.sessions.pop(sid, None)
             self.snapshots.clear()
             self.pending_actions.clear()
-            self.pending_network.clear()
             self.locks.clear()
             if failures:
                 raise ExceptionGroup("Browser cleanup failures", failures)

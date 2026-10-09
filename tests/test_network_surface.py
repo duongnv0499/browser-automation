@@ -13,13 +13,13 @@ import pytest
 from browser_automation.mcp import TOOLS, validate_arguments
 from browser_automation.service import ServiceError
 
-NETWORK_TOOLS = {"network_start_many", "network_list_many", "network_stop_many", "network_detail", "network_body", "network_call", "network_replay", "network_execute"}
+NETWORK_TOOLS = {"network_start_many", "network_list_many", "network_stop_many", "network_detail", "network_body", "network_calls", "network_call", "network_replay", "network_execute"}
 
 
 def test_network_catalog_and_host_only_options():
     names = {name for name, _, _ in TOOLS}
     assert NETWORK_TOOLS <= names
-    assert len(names) == len(TOOLS) == 29
+    assert len(names) == len(TOOLS)
     validate_arguments("network_call", {"session_id": "s", "tab_id": "t", "url": "https://example.org/api", "method": "PROPFIND", "prepare_only": True})
     validate_arguments("network_replay", {"session_id": "s", "tab_id": "t", "request_id": "r", "method": "GET", "body": None})
     for option in ("approved", "approval_required", "allow_sensitive", "executable_path"):
@@ -43,6 +43,8 @@ async def network_site():
             body = await reader.readexactly(int(lowered.get("content-length", "0")))
             seen.append({"method": method, "target": target, "headers": lowered, "body": body})
             path = urlsplit(target).path
+            if path == "/slow":
+                await asyncio.sleep(1)
             extra = b""
             status = b"200 OK"
             if path == "/":
@@ -53,6 +55,9 @@ async def network_site():
                 extra = b"Set-Cookie: fixture_session=private-cookie; HttpOnly; SameSite=Lax; Path=/\r\n"
             elif path == "/binary":
                 content, mime = bytes(range(256)) * 8, b"application/octet-stream"
+            elif path == "/seen-slow":
+                content = json.dumps({"slow_seen": any(item["target"] == "/slow" and item["method"] == "POST" for item in seen)}).encode()
+                mime = b"application/json"
             else:
                 content = json.dumps({"ordinary": "response-visible", "token": "fixture-private-response", "padding": "x" * 70000}).encode()
                 mime = b"application/json"
@@ -74,19 +79,38 @@ async def public_transport(transport):
     if transport == "cli":
         process = await asyncio.create_subprocess_exec(sys.executable, "-m", "browser_automation", "serve", stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         sequence = 0
+        pending = {}
+        async def receive():
+            while line := await process.stdout.readline():
+                response = json.loads(line)
+                waiter = pending.get(response.get("id"))
+                if waiter is not None and not waiter.done():
+                    waiter.set_result(response)
+        reader = asyncio.create_task(receive())
         async def call(name, args):
             nonlocal sequence
             sequence += 1
-            process.stdin.write((json.dumps({"id": sequence, "command": name, "arguments": args}) + "\n").encode())
+            rid = sequence
+            waiter = asyncio.get_running_loop().create_future()
+            pending[rid] = waiter
+            process.stdin.write((json.dumps({"id": rid, "command": name, "arguments": args}) + "\n").encode())
             await process.stdin.drain()
-            response = json.loads(await asyncio.wait_for(process.stdout.readline(), 30))
-            assert response["id"] == sequence
-            return response.get("result", {"error": response.get("error")})
+            try:
+                response = await asyncio.wait_for(waiter, 30)
+                return response.get("result", {"error": response.get("error")})
+            except asyncio.CancelledError:
+                process.stdin.write((json.dumps({"command": "cancel", "arguments": {"request_id": rid}}) + "\n").encode())
+                await process.stdin.drain()
+                raise
+            finally:
+                pending.pop(rid, None)
         try:
             yield call, None
         finally:
             process.stdin.close()
-            output, errors = await asyncio.wait_for(process.communicate(), 20)
+            await asyncio.wait_for(process.wait(), 20)
+            await reader
+            errors = await process.stderr.read()
             assert process.returncode == 0, errors.decode()
     else:
         from mcp import Client, StdioServerParameters
@@ -230,7 +254,7 @@ async def test_real_network_public_workflow(transport, monkeypatch, tmp_path):
         assert "Quiet UI" in visible["text"], "API response does not render a fabricated UI outcome"
         (tmp_path / f"network-{transport}-independent.png").write_bytes(base64.b64decode(visible["screenshot"]))
         (tmp_path / f"network-{transport}-groundtruth.json").write_text(json.dumps({
-            "transport": transport, "catalog_tools": 29, "capture_id": events["capture_id"],
+            "transport": transport, "catalog_tools": len(TOOLS), "capture_id": events["capture_id"],
             "request_id": request_id, "captured_tab_ids": [capture["tab_id"] for capture in many["captures"]],
             "captured_ordinary_query_present": "visible" in exported,
             "default_private_fields_absent": "fixture-private" not in exported,
@@ -295,5 +319,88 @@ async def test_sensitive_host_policy_and_foreign_approval(transport, monkeypatch
             "foreign_method": foreign_seen[0]["method"], "foreign_body": foreign_seen[0]["body"].decode(),
             "captured_authorization_forwarded": "authorization" in foreign_seen[0]["headers"],
             "captured_csrf_forwarded": "x-csrf-token" in foreign_seen[0]["headers"],
+        }, indent=2))
+        await successful(call, "close", {"session_id": sid})
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(os.environ.get("BROWSER_INTEGRATION_TESTS") != "1", reason="Coordinated real browser verification")
+@pytest.mark.parametrize("transport", ["stdio", "2026-07-28", "legacy", "cli"])
+async def test_real_network_plan_capacity_preserves_reviewed_plan(transport, monkeypatch, tmp_path):
+    approvals = tmp_path / "approvals.json"
+    approvals.write_text("[]")
+    monkeypatch.setenv("BROWSER_APPROVALS_FILE", str(approvals))
+    monkeypatch.setenv("BROWSER_NETWORK_PLAN_LIMIT", "129")
+    async with network_site() as (origin, seen), public_transport(transport) as (call, _):
+        sid = (await successful(call, "launch", {"headless": True}))["session_id"]
+        tab = (await successful(call, "new_tab", {"session_id": sid, "url": origin}))["tab"]["id"]
+        args = {"session_id": sid, "tab_id": tab}
+        before = len(seen)
+        first = None
+        for _ in range(129):
+            plan = await successful(call, "network_call", {**args, "url": origin + "/api", "method": "POST", "body": "reviewed"})
+            first = first or plan
+        assert len(seen) == before, "Preparing plans must not send requests"
+        overflow = await call("network_call", {**args, "url": origin + "/api", "method": "POST", "body": "overflow"})
+        assert "error" in overflow and "capacity" in overflow["error"]["message"].lower()
+        assert len(seen) == before
+        approvals.write_text(json.dumps([{"token": "first-host-plan", "binding": first["binding"], "expires_at": time.time() + 60}]))
+        result = await successful(call, "network_execute", {"session_id": sid, "plan_id": first["plan_id"], "approval_token": "first-host-plan"})
+        assert result["status"] == 200 and len(seen) == before + 1
+        assert seen[-1]["method"] == "POST" and seen[-1]["body"] == b"reviewed"
+        replacement = await successful(call, "network_call", {**args, "url": origin + "/api", "method": "POST", "body": "replacement"})
+        assert replacement["plan_id"] != first["plan_id"] and len(seen) == before + 1
+        (tmp_path / f"network-{transport}-capacity-groundtruth.json").write_text(json.dumps({
+            "transport": transport, "prepared_without_send": 129, "capacity_rejection": overflow["error"]["message"],
+            "first_plan_still_executable": result["status"] == 200, "issued_request_id": result["request_id"],
+            "server_api_requests": sum(item["target"] == "/api" for item in seen),
+            "capacity_released_for_new_plan": bool(replacement["plan_id"]),
+        }, indent=2))
+        await successful(call, "close", {"session_id": sid})
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(os.environ.get("BROWSER_INTEGRATION_TESTS") != "1", reason="Coordinated real browser verification")
+@pytest.mark.parametrize("transport", ["stdio", "2026-07-28", "legacy", "cli"])
+async def test_real_network_cancelled_request_is_discoverable_without_retry(transport, monkeypatch, tmp_path):
+    approvals = tmp_path / "approvals.json"
+    approvals.write_text("[]")
+    monkeypatch.setenv("BROWSER_APPROVALS_FILE", str(approvals))
+    async with network_site() as (origin, seen), public_transport(transport) as (call, _):
+        sid = (await successful(call, "launch", {"headless": True}))["session_id"]
+        tab = (await successful(call, "new_tab", {"session_id": sid, "url": origin}))["tab"]["id"]
+        args = {"session_id": sid, "tab_id": tab}
+        plan = await successful(call, "network_call", {**args, "url": origin + "/slow", "method": "POST", "body": "cancelled-outcome"})
+        assert not any(item["target"] == "/slow" for item in seen)
+        approvals.write_text(json.dumps([{"token": "cancel-host", "binding": plan["binding"], "expires_at": time.time() + 60}]))
+        execute = {"session_id": sid, "plan_id": plan["plan_id"], "approval_token": "cancel-host"}
+        pending = asyncio.create_task(call("network_execute", execute))
+        for _ in range(100):
+            if any(item["target"] == "/slow" for item in seen):
+                break
+            await asyncio.sleep(0.01)
+        assert sum(item["target"] == "/slow" for item in seen) == 1
+        pending.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await pending
+        for _ in range(100):
+            inventory = await successful(call, "network_calls", {**args, "plan_id": plan["plan_id"]})
+            records = inventory["calls"]
+            if records and records[0]["unavailable_reason"] == "cancelled_unknown_outcome":
+                break
+            await asyncio.sleep(0.01)
+        assert len(records) == 1 and records[0]["unavailable_reason"] == "cancelled_unknown_outcome", inventory
+        assert records[0]["plan_id"] == plan["plan_id"] and records[0]["request_id"]
+        detail = await successful(call, "network_detail", {**args, "request_id": records[0]["request_id"]})
+        body = await successful(call, "network_body", {**args, "request_id": records[0]["request_id"]})
+        assert body["unavailable_reason"] == "cancelled_unknown_outcome"
+        assert "cancelled_unknown_outcome" in json.dumps(detail)
+        assert "error" in await call("network_execute", execute)
+        await asyncio.sleep(1.1)
+        assert sum(item["target"] == "/slow" for item in seen) == 1, "Unknown outcome must never be automatically retried"
+        (tmp_path / f"network-{transport}-cancellation-groundtruth.json").write_text(json.dumps({
+            "transport": transport, "plan_id": plan["plan_id"], "request_id": records[0]["request_id"],
+            "inventory_unavailable_reason": records[0]["unavailable_reason"], "body_unavailable_reason": body["unavailable_reason"],
+            "server_post_requests": sum(item["target"] == "/slow" for item in seen), "session_retained": True,
         }, indent=2))
         await successful(call, "close", {"session_id": sid})
