@@ -4,7 +4,9 @@
 
 - Add actual network query/header/payload/response-body inspection with selectable sensitive output, transparent byte/base64 chunking and explicit retention/unavailable diagnostics; keep private replay credentials out of model previews.
 - Add browser-cookie-context API call/replay across authorized HTTP(S) endpoints and methods, immutable exact-approved plans for consequential requests, ordinary same-origin safe-read dispatch, strict host approval mode, manual redirect credential boundaries and separate API-response provenance.
-- Add explicit multi-tab capture and future-tab/pop-up opt-in, plus detail/body/call/replay/execute tools through the shared CLI, MCP stdio/current+legacy HTTP and OMP catalog; discover tools dynamically instead of requiring an obsolete fixed count.
+- Add explicit multi-tab capture and future-tab/pop-up opt-in, plus detail/body/call/replay/execute and bounded issued-call discovery through shared CLI, MCP stdio/current+legacy HTTP and OMP tools; discover the catalog dynamically instead of requiring an obsolete fixed count.
+- Preserve retriable body-read history and recover finished/evicted captured response bytes from retained browser handles without HTTP resend; preserve sanitized relative redirect Locations, bind plans to document generations and keep one authoritative executor plan lifecycle.
+- Verify the complete network cutover with one authorized **196-test** unified gate (no reported skips/failures), successful build and **8 clean installed-wheel real-browser/client workflow/cancellation cases** through stdio/current+legacy HTTP/CLI; include actual OMP cancellation in source acceptance, independent parent PNG/server-ground-truth review and transparent privacy/provenance/SDK-buffering limits.
 
 - Add bounded navigation that preserves owned tabs on timeout, safe skipped-subframe diagnostics and independent DOM coverage; improve generic custom-element/shadow/display:contents collection without expanding protected-document authority.
 - Replace whole-viewport visual equality with exact target-local pixel guards while retaining semantic/geometry/occlusion checks and fail-closed changed-target diagnostics.
