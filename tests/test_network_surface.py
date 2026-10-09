@@ -21,6 +21,7 @@ def test_network_catalog_and_host_only_options():
     assert NETWORK_TOOLS <= names
     assert len(names) == len(TOOLS) == 29
     validate_arguments("network_call", {"session_id": "s", "tab_id": "t", "url": "https://example.org/api", "method": "PROPFIND", "prepare_only": True})
+    validate_arguments("network_replay", {"session_id": "s", "tab_id": "t", "request_id": "r", "method": "GET", "body": None})
     for option in ("approved", "approval_required", "allow_sensitive", "executable_path"):
         with pytest.raises(ServiceError):
             validate_arguments("network_call", {"session_id": "s", "tab_id": "t", "url": "https://example.org", option: True})
@@ -183,6 +184,13 @@ async def test_real_network_public_workflow(transport, monkeypatch, tmp_path):
         assert sent["headers"]["authorization"] == "Bearer fixture-private-auth"
         assert "fixture_session=private-cookie" in sent["headers"]["cookie"]
         assert "error" in await call("network_execute", execute)
+        cleared = await successful(call, "network_replay", {**args, "request_id": request_id, "method": "GET", "body": None, "prepare_only": True})
+        before = len(seen)
+        approvals.write_text(json.dumps([{"token": "host-clear", "binding": cleared["binding"], "expires_at": time.time() + 60}]))
+        await successful(call, "network_execute", {"session_id": sid, "plan_id": cleared["plan_id"], "approval_token": "host-clear"})
+        assert len(seen) == before + 1 and seen[-1]["method"] == "GET" and seen[-1]["body"] == b""
+        original_body = await successful(call, "network_body", {**args, "request_id": request_id, "part": "request"})
+        assert "payload-visible" in original_body["data"], "Replay must not mutate the captured POST body"
         before = len(seen)
         safe = await successful(call, "network_call", {**args, "url": origin + "/503"})
         assert safe["provenance"] == "browser_context_api_request" and len(seen) == before + 1

@@ -82,7 +82,7 @@ NETWORK_OPTIONS = {
 REQUEST_OPTIONS = {
     "url": S, "method": {"type": "string", "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$"},
     "headers": {"type": "object", "additionalProperties": S},
-    "body": S, "json_body": {}, "form": {"type": "object"}, "body_base64": S,
+    "body": {"type": ["string", "null"]}, "json_body": {}, "form": {"type": "object"}, "body_base64": S,
     "params": {"type": "object"}, "timeout_ms": TIMEOUT,
     "max_redirects": {"type": "integer", "minimum": 0, "maximum": 20},
     "prepare_only": B,
