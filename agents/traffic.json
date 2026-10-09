@@ -1,0 +1,23 @@
+{
+  "owner": "Traffic",
+  "issues": ["05", "06"],
+  "owned_paths": ["src/browser_automation/browser_monitor.py", "tests/test_browser_monitor.py", "agents/traffic.json"],
+  "phase": "READY for coordinated verification; no checks run mid-flight",
+  "contract": {
+    "start": "async start(page, tab_id, kind='network', max_events=256, url_filter=None, payloads=False, max_payload_bytes=512) -> dict",
+    "list": "list(tab_id, kind, cursor=None, limit=100) -> dict",
+    "stop": "async stop(tab_id, kind) -> dict",
+    "close": "async close()",
+    "filter": "literal substring of sanitized URL, no regex",
+    "cursor": "monotonic per-capture event integer; bounded history exposes dropped/cursor_gap/oldest_cursor/latest_cursor",
+    "payloads": "websocket text only, explicit requested flag AND host BROWSER_MONITOR_PAYLOADS=1; best-effort bounded redaction, no binary data"
+  },
+  "research": [
+    {"url": "https://playwright.dev/python/docs/api/class-request", "accessed": "2026-10-09", "schema": "request, response, requestfinished, requestfailed; HTTP503 completes normally; redirect produces new Request.redirected_from; timing contains startTime and relative millisecond timing fields"},
+    {"url": "https://chromedevtools.github.io/devtools-protocol/tot/Network/", "accessed": "2026-10-09", "schema_source": "https://raw.githubusercontent.com/ChromeDevTools/devtools-protocol/master/json/browser_protocol.json", "schema": "webSocketCreated, HandshakeResponseReceived, FrameSent/Received, FrameError, Closed; WebSocketFrame opcode and payloadData; opcode1 UTF8 otherwise base64; represents entire message not fragmented wire frame"}
+  ],
+  "security": "No HTTP bodies, postdata, cookies, auth or headers exposed. URL userinfo/query/fragment removed, protected schemes suppressed. Request tracking uses bounded weak references. Socket metadata/rings bounded. Text payloads contain explicit redaction limitation warning. No interception.",
+  "verification": {"executed": [], "planned_authorized_command": "BROWSER_AGENT_LIBRARY_PATH=/home/claw/.local/lib/chromium/usr/lib/x86_64-linux-gnu uv run pytest tests/test_browser_monitor.py -q", "fixtures": "Real local asyncio HTTP503/redirect/failure and RFC6455 echo/ping/binary/error/close server; browser UI never displays results; screenshot proof via pytest tmp_path. Tests require Chromium and explicit parent gate."},
+  "limitations": ["Monitoring is prospective; preexisting requests and sockets may be incomplete", "CDP WebSocket messages do not expose fragmented-wire-frame boundaries", "Text redaction cannot guarantee removal of arbitrary secrets", "Actual Chromium ping/pong visibility remains to be exercised at parent verification gate"],
+  "preserved": ["doc.md", "issues reports"]
+}
