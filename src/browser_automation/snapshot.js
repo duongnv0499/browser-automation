@@ -12,15 +12,17 @@
   const maxTextChars = options.max_text_chars ?? 1000000;
   const maxElements = options.max_elements ?? 2000;
   const maxNodes = options.max_nodes ?? 20000;
-  const visible = el => {
-    const style = getComputedStyle(el), rect = el.getBoundingClientRect();
+  const visible = (el, rect = el.getBoundingClientRect()) => {
+    const style = getComputedStyle(el);
     if (style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity) === 0 || rect.width <= 0 || rect.height <= 0) return false;
     let left=Math.max(viewportClip.left,rect.left), top=Math.max(viewportClip.top,rect.top), right=Math.min(viewportClip.right,rect.right), bottom=Math.min(viewportClip.bottom,rect.bottom);
     for(let parent=el.parentElement||el.getRootNode().host;parent;parent=parent.parentElement||parent.getRootNode().host){
       const s=getComputedStyle(parent),r=parent.getBoundingClientRect();
       if(s.display==='none'||Number(s.opacity)===0) return false;
-      if(/hidden|clip|auto|scroll/.test(s.overflowX)){left=Math.max(left,r.left+parent.clientLeft);right=Math.min(right,r.left+parent.clientLeft+parent.clientWidth);}
-      if(/hidden|clip|auto|scroll/.test(s.overflowY)){top=Math.max(top,r.top+parent.clientTop);bottom=Math.min(bottom,r.top+parent.clientTop+parent.clientHeight);}
+      // Boxless custom hosts and display:contents do not establish clipping boxes.
+      const clips = s.display !== 'contents' && r.width > 0 && r.height > 0;
+      if(clips && /hidden|clip|auto|scroll/.test(s.overflowX)){left=Math.max(left,r.left+parent.clientLeft);right=Math.min(right,r.left+parent.clientLeft+parent.clientWidth);}
+      if(clips && /hidden|clip|auto|scroll/.test(s.overflowY)){top=Math.max(top,r.top+parent.clientTop);bottom=Math.min(bottom,r.top+parent.clientTop+parent.clientHeight);}
     }
     return right>left&&bottom>top;
   };
@@ -46,13 +48,19 @@
   state.fingerprint = el => JSON.stringify([el.tagName,el.type||el.getAttribute('type'),el.getAttribute('role'),label(el),fieldValue(el),el.href||'',el.form?.action||'',el.form?.method||'',el.getAttribute('formaction'),el.getAttribute('formmethod'),el.disabled,el.readOnly,el.multiple]);
   const elements = [], text = [], live = new Map(), fields = [];
   let visitedNodes = 0, textChars = 0, sourceTruncated = false, omittedElements = 0;
+  let editableNonempty = false, sensitiveFields = false, renderedTextNodes = 0;
   const walk = root => {
     if (visitedNodes >= maxNodes) { sourceTruncated = true; return; }
     for (const el of root.children || []) {
       if (++visitedNodes > maxNodes) { sourceTruncated = true; break; }
       if (['SCRIPT','STYLE','NOSCRIPT','TEMPLATE'].includes(el.tagName)) continue;
       if(el.matches('input,select,textarea,[contenteditable="true"]')) fields.push(state.fingerprint(el));
-      if (visible(el)) {
+      const isVisible = visible(el);
+      if (isVisible && el.matches('input,textarea,[contenteditable="true"]')) {
+        editableNonempty ||= !!String(el.value || (el.isContentEditable ? el.textContent : '')).trim();
+        sensitiveFields ||= sensitive(el);
+      }
+      if (isVisible) {
         const tag = el.tagName.toLowerCase(), type = el.getAttribute('type') || '', role = el.getAttribute('role') || ({a:'link',button:'button',select:'combobox',textarea:'textbox',input:type==='checkbox'?'checkbox':type==='radio'?'radio':'textbox',canvas:'canvas'}[tag] || tag);
         const ops = [];
         if (!el.disabled && !el.closest('[inert]')) {
@@ -84,9 +92,12 @@
             sourceTruncated = true;
           }
         }
-        for (const node of el.childNodes) if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
+      }
+      // Text may render under a zero-box host even though that host is not a target.
+      for (const node of el.childNodes) if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
           const range=document.createRange();range.selectNodeContents(node);const r=range.getBoundingClientRect();
-          if(r.width>0&&r.height>0&&r.right>viewportClip.left&&r.bottom>viewportClip.top&&r.left<viewportClip.right&&r.top<viewportClip.bottom) {
+          if(visible(el,r)) {
+            renderedTextNodes++;
             const str = node.textContent.trim();
             if (textChars + str.length <= maxTextChars) {
               text.push(str);
@@ -100,7 +111,6 @@
             }
           }
         }
-      }
       if (el.shadowRoot) {
         walk(el.shadowRoot);
       }
@@ -109,5 +119,5 @@
   };
   walk(document);
   state.nodes = live;
-  return {document:state.token,elements,omitted_elements:omittedElements,fields,text:text.join('\n'),source_truncated:sourceTruncated,viewport:{width:innerWidth,height:innerHeight},url:location.href,title:document.title};
+  return {document:state.token,elements,omitted_elements:omittedElements,fields,text:text.join('\n'),source_truncated:sourceTruncated,viewport:{width:innerWidth,height:innerHeight},url:location.href,title:document.title,ready_state:document.readyState,editable_nonempty:editableNonempty,sensitive_fields:sensitiveFields,visited_nodes:visitedNodes,rendered_text_nodes:renderedTextNodes};
 }

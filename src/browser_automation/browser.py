@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import io
 import math
 import os
 import platform
@@ -17,7 +18,10 @@ import mimetypes
 import tempfile
 
 import httpx
-from playwright.async_api import async_playwright, Error as PlaywrightError
+from playwright.async_api import async_playwright, Error as PlaywrightError, TimeoutError as PlaywrightTimeoutError
+from PIL import Image, ImageChops
+from .browser_monitor import TrafficMonitor
+from .page_state import describe_dom
 from .browser_files import ScopedFiles, FilePolicyError, MAX_FILE_BYTES, MAX_UPLOAD_BYTES, MAX_UPLOAD_FILES
 
 
@@ -108,6 +112,7 @@ class BrowserSession:
         self._oop_cdp: dict[Any, Any] = {}
         self._local_frames: set[Any] = set()
         self._world_name = 'browser-automation-' + uuid.uuid4().hex
+        self._monitor = TrafficMonitor()
 
     @staticmethod
     def _allowed_url(url: str, *, subframe: bool = False) -> bool:
@@ -120,7 +125,7 @@ class BrowserSession:
             return False
 
     def _ensure_safe(self, page: Any) -> None:
-        if not self._allowed_url(page.url) or any(not self._allowed_url(frame.url,subframe=frame.parent_frame is not None) for frame in page.frames):
+        if not self._allowed_url(page.url):
             raise ProtectedUrlError('Protected URL scheme: only HTTP(S), about:blank, and inherited srcdoc frames can be controlled or observed')
 
     async def _frames(self, page: Any) -> list[_FrameRef]:
@@ -175,8 +180,6 @@ class BrowserSession:
                 if parent not in refs:
                     raise StaleObservationError('Native frame topology changed during collection')
                 refs[key].parent_frame = refs[parent]
-            if not self._allowed_url(data['url'],subframe=parent is not None):
-                raise ProtectedUrlError('Protected subframe URL cannot be observed')
         root = trees[0][1]['frame']['id']
         return [refs[root]] + [ref for key,ref in refs.items() if key != root]
 
@@ -203,6 +206,8 @@ class BrowserSession:
         parent = frame.parent_frame
         if parent is None:
             raise BrowserError('Main frame has no iframe owner')
+        if not self._allowed_url(parent.url, subframe=parent.parent_frame is not None):
+            raise ProtectedUrlError('Protected ancestor frame cannot be evaluated')
         context = await self._world(parent)
         owner = await parent.session.send('DOM.getFrameOwner',{'frameId':frame.frame_id})
         remote = await parent.session.send('DOM.resolveNode',{'backendNodeId':owner['backendNodeId'],'executionContextId':context})
@@ -332,7 +337,15 @@ class BrowserSession:
             return page.url
 
 
-    async def new_tab(self, url: str = 'about:blank') -> dict[str, str]:
+    @staticmethod
+    def _navigation_options(wait_until: str, timeout_ms: int) -> None:
+        if wait_until not in {'commit', 'domcontentloaded', 'load'}:
+            raise BrowserError('wait_until must be commit, domcontentloaded, or load')
+        if isinstance(timeout_ms, bool) or not isinstance(timeout_ms, int) or not 1 <= timeout_ms <= 120000:
+            raise BrowserError('timeout_ms must be between 1 and 120000')
+
+    async def new_tab(self, url: str = 'about:blank', wait_until: str = 'domcontentloaded', timeout_ms: int = 15000) -> dict[str, Any]:
+        self._navigation_options(wait_until, timeout_ms)
         if not isinstance(url,str) or not self._allowed_url(url):
             raise UnsafeActionError('Navigation permits only HTTP(S) and about:blank')
         async with self._lock:
@@ -342,8 +355,12 @@ class BrowserSession:
             page = await self._default_context.new_page()
             self._owned.add(page)
             self._sync_pages()
+            status = 'complete'
             try:
-                await page.goto(url)
+                try:
+                    await page.goto(url, wait_until=wait_until, timeout=timeout_ms)
+                except PlaywrightTimeoutError:
+                    status = 'timeout'
                 self._ensure_safe(page)
             except BaseException:
                 try:
@@ -353,19 +370,40 @@ class BrowserSession:
                 self._owned.discard(page)
                 self._sync_pages()
                 raise
-            return {'id': self._ids[page], 'url': page.url, 'title': await page.title()}
+            result = {'id': self._ids[page], 'url': page.url, 'title': await page.title(), 'navigation_status': status, 'wait_until': wait_until}
+            if status == 'timeout':
+                result['diagnostic'] = {'code': 'navigation_timeout', 'timeout_ms': timeout_ms, 'message': 'Owned tab retained; observe the partially loaded page before choosing another action'}
+            return result
 
     async def close_tab(self, tab_id: str) -> None:
         async with self._lock:
             page = self._page(tab_id,allow_protected=True)
             if self._attached and page not in self._owned:
                 raise UnsafeActionError('Cannot close a preexisting user tab')
+            for kind in ('network', 'websocket'):
+                await self._monitor.stop(tab_id, kind)
+            self._invalidate(tab_id)
             await page.close()
             self._owned.discard(page)
             self._sync_pages()
 
+    async def monitor_start(self, tab_id: str, kind: str, **options: Any) -> dict[str, Any]:
+        async with self._lock:
+            return await self._monitor.start(self._page(tab_id), tab_id, kind, **options)
+
+    async def monitor_list(self, tab_id: str, kind: str, cursor: str | None = None, limit: int = 100) -> dict[str, Any]:
+        async with self._lock:
+            self._page(tab_id)
+            return self._monitor.list(tab_id, kind, cursor=cursor, limit=limit)
+
+    async def monitor_stop(self, tab_id: str, kind: str) -> dict[str, Any]:
+        async with self._lock:
+            return await self._monitor.stop(tab_id, kind)
+
     async def _frame_geometry(self, frame: _FrameRef) -> tuple[float, float, dict[str, float]]:
-        view = await self._eval(frame,'({width:innerWidth,height:innerHeight})')
+        view = (await self._eval(frame,'({width:innerWidth,height:innerHeight})')
+                if self._allowed_url(frame.url, subframe=frame.parent_frame is not None)
+                else {'width': 1000000, 'height': 1000000})
         clip = {'left':0.0,'top':0.0,'right':float(view['width']),'bottom':float(view['height'])}
         x = y = 0.0
         current = frame
@@ -401,8 +439,42 @@ class BrowserSession:
         context = {'text':data['text'],'fields':data['fields'],'elements':[(e['id'],e['signature'],e['operations'],e.get('options')) for e in data['elements']]}
         return hashlib.sha256(json.dumps(context,sort_keys=True,separators=(',',':')).encode()).hexdigest()
 
+    def _frame_allowed(self, frame: _FrameRef) -> bool:
+        current = frame
+        while current is not None:
+            if not self._allowed_url(current.url, subframe=current.parent_frame is not None):
+                return False
+            current = current.parent_frame
+        return True
+
+    async def _protected_frames(self, frames: list[_FrameRef]) -> tuple[list[dict[str, Any]], bool]:
+        limitations = []
+        withheld = False
+        for frame in frames:
+            if self._frame_allowed(frame):
+                continue
+            visibility = 'unknown'
+            try:
+                await self._frame_geometry(frame)
+                visibility = 'visible'
+            except ProtectedUrlError:
+                pass
+            except UnsafeActionError as exc:
+                if 'hidden' in str(exc) or 'clipped' in str(exc):
+                    visibility = 'hidden'
+            except PlaywrightError:
+                pass
+            withheld |= visibility != 'hidden'
+            limitations.append({'frame_id': frame.frame_id, 'scheme': urlsplit(frame.url).scheme,
+                                'code': 'protected_subframe_skipped', 'visibility': visibility,
+                                'reason': 'Protected frame content and targets are not disclosed'})
+        return limitations, withheld
+
     async def _capture(self, page: Any) -> bytes:
-        masks = [frame.locator('input[type="password"],input[autocomplete*="password"],input[autocomplete^="cc-"],input[autocomplete="one-time-code"]') for frame in page.frames]
+        limitations, withheld = await self._protected_frames(await self._frames(page))
+        if withheld:
+            raise UnsafeActionError('Screenshot withheld: visible or unknown protected subframe')
+        masks = [frame.locator('input[type="password"],input[autocomplete*="password"],input[autocomplete^="cc-"],input[autocomplete="one-time-code"]') for frame in page.frames if self._allowed_url(frame.url, subframe=frame.parent_frame is not None)]
         self._ensure_safe(page)
         return await page.screenshot(type='png', full_page=False, mask=masks)
 
@@ -416,6 +488,12 @@ class BrowserSession:
             targets: dict[str, _Target] = {}
             elements, sections, documents, limitations = [], [], [], []
             frames = await self._frames(page)
+            all_frame_ids = {f.frame_id for f in frames}
+            protected, screenshot_withheld = await self._protected_frames(frames)
+            limitations.extend(protected)
+            safety = {'editable_nonempty': False, 'sensitive_fields': False, 'unsaved': False}
+            ready_state = 'unknown'
+            collected_text_nodes = 0
             source_truncated = False
             if len(frames) > 64:
                 limitations.append({'frame': 64, 'reason': f'Omitted {len(frames) - 64} frames beyond 64-frame limit'})
@@ -425,6 +503,8 @@ class BrowserSession:
             total_text_budget = 1000000
             omitted_elements = 0
             for index, frame in enumerate(frames):
+                if not self._frame_allowed(frame):
+                    continue
                 try:
                     ox, oy, clip = await self._frame_geometry(frame)
                     remaining_text = max(0, total_text_budget - sum(len(s) for s in sections))
@@ -434,12 +514,17 @@ class BrowserSession:
                     limitations.append({'frame': index, 'reason': 'detached or unavailable frame'})
                     continue
                 except ProtectedUrlError:
-                    raise
+                    raise StaleObservationError('Frame navigated to a protected document during observation') from None
                 except UnsafeActionError as exc:
                     limitations.append({'frame': index, 'reason': str(exc)})
                     continue
                 if data.get('source_truncated'):
                     source_truncated = True
+                for key in ('editable_nonempty', 'sensitive_fields'):
+                    safety[key] |= data.get(key, False)
+                collected_text_nodes += data.get('rendered_text_nodes', 0)
+                if frame.parent_frame is None:
+                    ready_state = data.get('ready_state', 'unknown')
                 omitted_elements += data.get('omitted_elements', 0)
                 documents.append((frame, data['document'], self._semantic_digest(data)))
                 sections.append(f"[frame {index}: {data['url']}]\n{data['text']}")
@@ -456,9 +541,24 @@ class BrowserSession:
                     elements.append({**element, 'id': public, 'bounds': bounds, 'frame': {'index': index, 'url': data['url'], 'offset': {'x': ox, 'y': oy}, 'document': data['document']}})
             text = '\n\n'.join(sections)
             observation: dict[str, Any] = {'id': revision, 'tab_id': tab_id, 'url': page.url, 'title': await page.title(), 'text': text[:max_text], 'elements': elements, 'truncated': len(text) > max_text or source_truncated, 'source_truncated': source_truncated, 'text_length': len(text), 'next_offset': max_text if len(text) > max_text else None, 'omitted_elements': omitted_elements, 'timestamp': time.time(), 'limitations': limitations}
-            if screenshot:
+            coverage_reasons = [item.get('code', 'frame_unavailable') for item in limitations if item.get('visibility') != 'hidden']
+            if source_truncated:
+                coverage_reasons.append('collector_budget_exceeded')
+            if not collected_text_nodes and not any(e['role'] != 'canvas' for e in elements):
+                coverage_reasons.append('empty_rendered_dom')
+            observation.update(ready_state=ready_state, safety=safety,
+                               coverage={'status': 'partial' if coverage_reasons else 'complete',
+                                         'reasons': list(dict.fromkeys(coverage_reasons)),
+                                         'dom_elements': len(elements), 'rendered_text_nodes': collected_text_nodes})
+            observation['page_state'] = describe_dom(observation)
+            png = None
+            if screenshot and screenshot_withheld:
+                observation['screenshot_status'] = 'withheld'
+                observation['diagnostic'] = {'code': 'protected_frame_screenshot_withheld', 'message': 'Main DOM remains available; protected subframe pixels cannot be disclosed'}
+            if screenshot and not screenshot_withheld:
                 png = await self._capture(page)
                 observation['screenshot'] = base64.b64encode(png).decode('ascii')
+                observation['screenshot_status'] = 'captured'
                 viewport = await self._eval(frames[0],'({width:innerWidth,height:innerHeight})')
                 observation['viewport'] = viewport
                 main_doc = next((token for frame, token, digest in documents if frame.parent_frame is None), None)
@@ -469,7 +569,7 @@ class BrowserSession:
                             bounds = {'x': col * viewport['width']/8, 'y': row * viewport['height']/8, 'width': viewport['width']/8, 'height': viewport['height']/8}
                             targets[key] = _Target(frames[0], main_doc, None, ['click','hover','drag','scroll'], bounds, True)
                             elements.append({'id': key, 'role': 'visual-region', 'name': f'Screenshot region row {row} column {col}', 'value': '', 'operations': ['click','hover','drag','scroll'], 'bounds': bounds, 'frame': {'index': 0, 'document': main_doc}})
-            self._snapshots[revision] = {'tab': tab_id, 'targets': targets, 'documents': documents, 'frame_ids':{f.frame_id for f in frames}, 'text': text, 'url': page.url, 'visual': screenshot, 'pixels': png if screenshot else None, 'source_truncated': source_truncated, 'page': page}
+            self._snapshots[revision] = {'tab': tab_id, 'targets': targets, 'documents': documents, 'frame_ids': all_frame_ids, 'text': text, 'url': page.url, 'visual': png is not None, 'pixels': png, 'source_truncated': source_truncated, 'page': page}
             while len(self._snapshots) > self._snapshot_limit:
                 self._snapshots.pop(next(iter(self._snapshots)))
             if screenshot:
@@ -571,7 +671,7 @@ class BrowserSession:
         if not isinstance(action, dict):
             raise UnsafeActionError('Action must be an object')
         operation = action.get('operation')
-        if operation not in {'click','fill','select','scroll','press','hover','drag','wait','back','forward'}:
+        if operation not in {'click','fill','select','scroll','press','hover','drag','wait','back','forward','reload'}:
             raise UnsafeActionError('Unsupported operation')
         snapshot = self._snapshot(tab_id, action.get('observation_id', ''))
         target = snapshot['targets'].get(action.get('target'))
@@ -609,6 +709,8 @@ class BrowserSession:
             raise UnsafeActionError('scroll deltas must be finite and bounded')
         if operation=='wait' and (not isinstance(seconds,(int,float)) or isinstance(seconds,bool) or not math.isfinite(seconds) or not 0<=seconds<=10):
             raise UnsafeActionError('wait seconds must be between 0 and 10')
+        if operation == 'reload':
+            self._navigation_options(action.get('wait_until', 'domcontentloaded'), action.get('timeout_ms', 15000))
         if operation=='drag' and destination is None:
             raise UnsafeActionError('drag requires observed to_target')
         point = await self._point(target, action) if target else None
@@ -617,6 +719,7 @@ class BrowserSession:
         started = time.perf_counter()
         # Invalidate before dispatch, including failed/partial operations.
         self._invalidate(tab_id)
+        navigation_status = None
         if operation == 'click':
             await page.mouse.click(*point)
         elif operation == 'hover':
@@ -667,6 +770,12 @@ class BrowserSession:
             await page.go_back()
         elif operation == 'forward':
             await page.go_forward()
+        elif operation == 'reload':
+            navigation_status = 'complete'
+            try:
+                await page.reload(wait_until=action.get('wait_until', 'domcontentloaded'), timeout=action.get('timeout_ms', 15000))
+            except PlaywrightTimeoutError:
+                navigation_status = 'timeout'
         self._ensure_safe(page)
         await asyncio.sleep(0)  # yield for popup notification; never a fabricated wait-for-success
         self._sync_pages()
@@ -676,7 +785,12 @@ class BrowserSession:
                 if page in self._owned:
                     self._owned.add(popup)
                 popup_ids.append(self._ids[popup])
-        return {'operation': operation, 'tab_id': tab_id, 'url': page.url, 'popup_tabs': popup_ids, 'latency_ms': (time.perf_counter()-started)*1000}
+        result = {'operation': operation, 'tab_id': tab_id, 'url': page.url, 'popup_tabs': popup_ids, 'latency_ms': (time.perf_counter()-started)*1000}
+        if navigation_status is not None:
+            result.update(navigation_status=navigation_status, wait_until=action.get('wait_until', 'domcontentloaded'))
+            if navigation_status == 'timeout':
+                result['diagnostic'] = {'code': 'navigation_timeout', 'timeout_ms': action.get('timeout_ms', 15000), 'message': 'Observe retained tab before choosing another action'}
+        return result
 
     @staticmethod
     def _upload_payloads(paths: list[str], allowed_directory: str) -> list[dict[str,str]]:
@@ -762,6 +876,7 @@ class BrowserSession:
             if self._closed:
                 return
             self._closed = True
+            await self._monitor.close()
             sessions = set(self._page_cdp.values()) | set(self._oop_cdp.values())
             for session in sessions:
                 try:
