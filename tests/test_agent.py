@@ -438,3 +438,71 @@ async def test_four_inspected_evidence_windows_are_all_freshly_verified():
     result = await BrowserAgent(session, FourWindowProvider(), max_text=10).run("t1", "Verify four separate proofs")
     assert result["status"] == "success"
     assert session.reads == [(revision, offset) for revision in ("r1", "r2") for offset in (10, 20, 30, 40)]
+
+
+@pytest.mark.asyncio
+async def test_progress_order_needs_user_and_no_private_values():
+    events = []
+
+    async def receive(event):
+        await asyncio.sleep(0)
+        events.append(event)
+
+    session = Session()
+    result = await BrowserAgent(session, Provider("click"), on_progress=receive).run("t1", "Submit secret-goal")
+    assert result["status"] == "approval_required"
+    assert [e["checkpoint"] for e in events] == ["observe", "needs_user"]
+    assert [e["seq"] for e in events] == [1, 2]
+    assert events[1]["status"] == "approval_required"
+    assert "Submit" not in json.dumps(events) and "secret-goal" not in json.dumps(events)
+    assert not session.calls
+
+
+@pytest.mark.asyncio
+async def test_progress_cancellation_does_not_close_or_replay_session():
+    events = []
+
+    class CancellingProvider(Provider):
+        async def choose(self, *args):
+            raise asyncio.CancelledError()
+
+    session = Session()
+    result = await BrowserAgent(session, CancellingProvider(), on_progress=events.append).run("t1", "Stop safely")
+    assert result["status"] == "cancelled" and session.calls == []
+    assert events[-1]["checkpoint"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_visual_recovery_is_observed_but_never_autoapproved():
+    events = []
+
+    class VisualSession(Session):
+        async def observe(self, tab_id, **kwargs):
+            assert kwargs["screenshot"] is True
+            return {"id": "r1", "tab_id": tab_id, "url": "https://fixture.test/", "text": "", "elements": [],
+                    "coverage": {"status": "unknown"}, "screenshot": "fixture image"}
+
+    class VisualProvider(Provider):
+        async def interpret_visual(self, observation):
+            return {"state": "error", "source": "vision", "visible_text": ["REFRESH"], "recovery_recommended": True,
+                    "summary": "Visual recovery control", "self_reported_confidence": .8, "calibrated": False, "regions": []}
+
+    session = VisualSession()
+    result = await BrowserAgent(session, VisualProvider("reload"), interpret_visual=True, on_progress=events.append,
+        recovery_policy={"reload_without_approval_origins": ["https://fixture.test"]}).run("t1", "Recover if safe")
+    assert result["status"] == "approval_required" and not session.calls
+    assert result["observation"]["visual_summary"]["visible_text"] == ["REFRESH"]
+    assert result["approval"]["recovery"][0]["provenance"] == "vision"
+    assert events[0]["page_state"]["source"] == "dom+vision"
+    assert events[0]["page_state"]["recovery_available"] is True
+
+
+@pytest.mark.asyncio
+async def test_repeated_same_observation_progress_is_debounced():
+    events = []
+    result = await BrowserAgent(Session(), Provider("wait"), max_steps=4, on_progress=events.append).run("t1", "Wait")
+    # Executed steps are meaningful; identical same-step verifier observations are suppressed.
+    assert len(events) <= 6
+    assert all(a["seq"] < b["seq"] for a, b in zip(events, events[1:]))
+    assert result["status"] in {"no_progress", "step_limit"}
+

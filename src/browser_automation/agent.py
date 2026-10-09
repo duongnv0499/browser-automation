@@ -158,6 +158,7 @@ class BrowserAgent:
         async def observe() -> dict:
             begin = time.perf_counter()
             result = await self._observe(tab_id)
+            metrics["browser_ms"] += (time.perf_counter() - begin) * 1000
             if self.interpret_visual:
                 visual = await self.provider.interpret_visual(result)
                 account(getattr(self.provider, "last_metrics", {}))
@@ -168,7 +169,6 @@ class BrowserAgent:
             result["available_tabs"] = [tab for id_, tab in known_tabs.items() if id_ != tab_id]
             text_offsets.clear()
             evidence_metadata(result)
-            metrics["browser_ms"] += (time.perf_counter() - begin) * 1000
             await emit("observe", result)
             return result
 
@@ -316,7 +316,7 @@ class BrowserAgent:
         finally:
             self._running = False
         metrics["elapsed_ms"] = (time.perf_counter() - started) * 1000
-        await emit("cancelled" if status == "cancelled" else "blocked" if status in {"blocked", "no_progress", "refused", "provider_error", "verification_failed", "step_limit"} else "done", observation, terminal_status=status)
+        await emit("cancelled" if status == "cancelled" else "needs_user" if status == "approval_required" else "blocked" if status in {"blocked", "no_progress", "refused", "provider_error", "verification_failed", "step_limit"} else "done", observation, terminal_status=status)
         result = {"status": status, "steps": steps, "observation": observation,
                   "verification": verification, "metrics": metrics, "active_tab": tab_id}
         if pending is not None:

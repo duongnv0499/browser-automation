@@ -26,7 +26,8 @@ def recording_server():
             payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             records.append((self.path, payload, self.headers.get("Authorization")))
             if "messages" in payload:
-                data = {"choices": [{"message": {"content": json.dumps({"text": "hello", "refusal": False})}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 7, "completion_tokens": 2}}
+                result = state.get("visual_result", {"text": "hello", "refusal": False})
+                data = {"choices": [{"message": {"content": json.dumps(result)}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 7, "completion_tokens": 2}}
             else:
                 router = "state" in payload
                 questions = payload["questions"]
@@ -188,3 +189,33 @@ def test_large_action_windows_preserve_every_target_and_refine_points():
     assert 0 < click["x"] < 100 and 0 < click["y"] < 100
     assert any(a["operation"] == "drag" and a["to_target"] == "drop" for a in actions.values())
     assert any(a["operation"] == "scroll" and a.get("target") == "canvas" for a in actions.values())
+
+
+@pytest.mark.asyncio
+async def test_unprimed_visual_text_transport_and_region_validation(recording_server):
+    url, records, state = recording_server
+    state["visual_result"] = {"state": "error", "summary": "A recovery label is visible", "visible_text": ["ARBITRARY FIXTURE LABEL"],
+        "region_targets": ["e1"], "recovery_recommended": True, "self_reported_confidence": .7, "refusal": False}
+    client = DecisionProvider(api_key="deterministic-local-only", text_endpoint=url + "/chat")
+    observed = observation(True)
+    observed["elements"][0]["bounds"] = {"x": 0, "y": 0, "width": 80, "height": 30}
+    try:
+        result = await client.interpret_visual(observed)
+        assert result["source"] == "vision" and result["calibrated"] is False
+        assert result["visible_text"] == ["ARBITRARY FIXTURE LABEL"]
+        assert result["regions"][0]["target"] == "e1"
+        payload = records[0][1]
+        assert payload["response_format"]["json_schema"]["name"] == "visual_summary"
+        assert "ARBITRARY FIXTURE LABEL" not in json.dumps(payload)
+        assert "Refresh" not in json.dumps(payload)
+        assert payload["messages"][1]["content"][1]["type"] == "image_url"
+        state["visual_result"]["region_targets"] = ["invented"]
+        with pytest.raises(ProviderProtocolError, match="unobserved region"):
+            await client.interpret_visual(observed)
+        state["visual_result"]["region_targets"] = []
+        state["visual_result"]["visible_text"] = ["x" * 241]
+        with pytest.raises(ProviderProtocolError, match="bounded visual text"):
+            await client.interpret_visual(observed)
+    finally:
+        await client.close()
+

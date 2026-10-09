@@ -104,7 +104,7 @@ def compose_page_state(observation: dict, visual: dict | None = None, policy: di
     result = describe_dom(observation)
     if visual is not None:
         result = {**result, "dom": dict(result), "vision": visual, "source": "dom+vision"}
-        if result["state"] == "unknown" and visual.get("state") in STATES:
+        if result["state"] in {"unknown", "ready"} and visual.get("state") in STATES - {"unknown"}:
             result["state"] = visual["state"]
             result["summary"] = "Visual interpretation available; see separately attributed vision evidence."
         if visual.get("recovery_recommended") and not result["recovery_candidates"]:

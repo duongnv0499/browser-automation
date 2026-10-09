@@ -438,7 +438,7 @@ class DecisionProvider:
             raise ProviderProtocolError("Invalid visual interpretation flags")
         if result["refusal"]:
             raise ProviderRefusal("Visual interpretation refused")
-        if result["state"] not in STATES or not isinstance(result["summary"], str) or len(result["summary"]) > 600:
+        if not isinstance(result["state"], str) or result["state"] not in STATES or not isinstance(result["summary"], str) or len(result["summary"]) > 600:
             raise ProviderProtocolError("Invalid visual interpretation state or summary")
         texts, targets = result["visible_text"], result["region_targets"]
         observed = {r["target"]: r for r in regions}
