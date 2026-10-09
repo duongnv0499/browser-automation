@@ -1,7 +1,7 @@
 {
   "goal": "Production-usable Python browser automation with explicit native Chrome consent or isolated launch, OpenRouter-primary/OpenAI Decisions, guarded observation/control, CLI/MCP and available OMP integration.",
   "parent_role": "Research initially; then PM, architecture and review only. Workers implement and repair owned paths.",
-  "git_owner": "DocsSkill exclusively serializes exact-path feature commits and origin/main pushes for Streamable HTTP and portable skill milestones. No git add ., force/reset, or unrelated paths.",
+  "git_owner": "SetupProof exclusively serializes exact-path commits and origin/main pushes for agent-directed installation docs. No git add ., force/reset, or unrelated paths.",
   "verification_gate": "All workers READY first; parent authorizes unified checks. No mid-flight tests/builds/lint/smokes.",
   "ownership": {
     "Harness": ["AGENTS.md", "agents/worker-instructions.md", "agents/workstreams.json", "README.md", "pyproject.toml", "uv.lock", ".gitignore", ".env.example", "src/browser_automation/__init__.py", "docs/architecture.md", "docs/research.md", "CHANGELOG.md"],
@@ -10,6 +10,8 @@
     "Integration": ["src/browser_automation/service.py", "src/browser_automation/cli.py", "src/browser_automation/mcp.py", "integrations/", "integration tests", "docs/integrations.md", "agents/integration.json"]
     ,"HttpTransport": ["src/browser_automation/mcp_http.py", "src/browser_automation/mcp.py", "src/browser_automation/cli.py", "pyproject.toml", "uv.lock", ".env.example", "tests/test_mcp_http.py", "tests/test_mcp_http_browser.py", "agents/http.json"],
     "DocsSkill": ["skills/browser-automation/SKILL.md", "docs/http.md", "docs/integrations.md", "docs/architecture.md", "docs/research.md", "README.md", "CHANGELOG.md", "agents/workstreams.json", "agents/skill.json"]
+    ,"SetupDocs": ["install.md", "README.md", "docs/integrations.md", "docs/http.md", "agents/setup-docs.json"],
+    "SetupProof": ["agents/setup-proof.json", "agents/workstreams.json", "docs/research.md", "CHANGELOG.md"]
   },
   "contracts": {
     "runtime": "Python >=3.11, async methods, src/browser_automation package",
@@ -157,6 +159,15 @@
     "artifacts": {"unified":"/tmp/browser-http-final-proof/","installed_wheel":"/tmp/browser-http-installed-wheel-proof.json","codex_discovery":"/tmp/browser-skill-proof-qjbtxeun/skills-list.json","sdist_sha256":"8263d8b25ba7ea0d7b4091b540f84fe53805b7dd9f252ca0b4df08124a163d1c","wheel_sha256":"a320ae9089846ae47cd4b83fa063d58668790465907adc72ac5aaa5ed632aca7"},
     "limits": ["No live Luna/provider or paid Codex/Claude HTTP model turn", "No personal logged-in Chrome/native consent dialog or headed desktop", "No installed-wheel browser launch", "Actual localhost two-hop HTTP relay is not nginx/TLS/public deployment", "Claude/Hermes skill discovery documentation-based", "No Facebook or matched competitor benchmark"],
     "release_commit": "Exact final docs/state commit and successful push result reported in DocsSkill handoff; self-hash cannot be embedded in its own content"
+  },
+  "agent_install_feature": {
+    "date": "2026-10-09",
+    "goal": "Natural-language agent installation via install.md; local stdio default, safe Codex MCP registration and portable skill discovery; HTTP opt-in, no installer daemon or mandatory model key.",
+    "phase": "Both workers READY; SetupProof /tmp script prepared, no smoke run; awaiting parent review/early exact-path push authorization and explicit unified smoke authorization",
+    "ownership": "SetupDocs implements install runbook/client docs; SetupProof owns research, evidence, states and exact-path GitOwner commits/push.",
+    "verification_gate": "Both workers READY, parent review, early docs push, then explicit parent authorization of isolated HOME/CODEX_HOME fresh remote clone installation first/rerun/conflict preservation plus actual tools/doctor and skill discovery.",
+    "safety": "Preserve doc.md, unrelated config/checkouts/skills/credentials; no native attachment/browser restart, paid model, secret output, force replacement or permanent daemon. Missing keys do not prevent diagnostics.",
+    "evidence_limits": "Existing installed uv/Codex and cached dependencies are not a clean-machine or autonomous paid Codex conversation proof."
   },
   "resume": "Re-read AGENTS.md, this file, own state, and current owned source; retain scope/research/security/verification/commit rules."
 }

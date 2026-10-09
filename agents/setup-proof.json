@@ -1,0 +1,16 @@
+{
+  "worker": "SetupProof",
+  "date": "2026-10-09",
+  "phase": "READY: docs handoff received and proof script prepared, not executed; awaiting parent scope review/early push and explicit smoke authorization",
+  "owned_paths": ["agents/setup-proof.json", "agents/workstreams.json", "docs/research.md", "CHANGELOG.md"],
+  "git_owner": true,
+  "commit_contract": "Exact SetupDocs handed-off paths and own paths only, serialized commits/push shared main; no git add ., force, reset, or doc.md changes.",
+  "proof_script": "/tmp/browser-agent-install-proof.py",
+  "proof_command_after_authorization": "/home/claw/.local/bin/uv run --no-project --with mcp==2.3.0 python /tmp/browser-agent-install-proof.py",
+  "setup_docs_handoff": {"paths": ["install.md", "README.md", "docs/integrations.md", "docs/http.md", "agents/setup-docs.json"], "commit_message": "docs: add safe Codex self-install runbook and agent install prompt"},
+  "installed_interfaces": {"codex": "0.156.1", "uv": "0.11.16", "uv_absolute": "/home/claw/.local/bin/uv", "mcp_get": "codex mcp get NAME --json", "http_add": "codex mcp add NAME --url URL --bearer-token-env-var ENV", "schema_dir": "/tmp/browser-setup-codex-schema", "skills_list": "skills/list params cwds array, forceReload true; initialize clientInfo name/version required"},
+  "plan": ["Prepare throwaway /tmp proof only", "Both workers READY and parent review before exact-path docs commit/push", "Parent explicit authorization before any installation smoke", "Fresh remote clone under isolated HOME/CODEX_HOME; actual documented sync/register/link/doctor then exact rerun", "Preserve unrelated MCP config and .env values; reject foreign checkout/skill and select unused MCP name", "Actual stdio SDK initialize/tools/list/doctor and Codex app-server skills/list", "Optional HTTP runtime/SDK token-env registration only with documented recipe"],
+  "limits": ["No paid model turn or autonomous Codex install conversation", "No native browser consent or existing profile access", "Existing uv/Codex and shared cache are not clean-machine prerequisite proof"],
+  "sources": ["https://docs.astral.sh/uv/getting-started/installation/", "https://docs.astral.sh/uv/concepts/projects/sync/"],
+  "resume": "Read AGENTS.md/workstreams/own state, wait for docs handoff + parent authorization; never smoke mid-flight."
+}

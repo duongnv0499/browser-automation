@@ -2,6 +2,8 @@
 
 Stdio/JSONL retain browser state in one persistent worker; authenticated [Streamable HTTP](http.md) additionally lets compatible agents connect to one server on the browser host. The existing OMP extension remains stdio/JSONL. CDP endpoints must be loopback HTTP/WebSocket URLs; remote endpoints and URL credentials are rejected. Browser page contents and API keys are not written to routine logs. Observations are sensitive: the caller receives page content and optional screenshots, and autonomous runs send these to the selected model provider.
 
+For “install this repo” in Codex, follow [the agent-executable install runbook](../install.md): default local stdio plus skill, absolute paths, preserved configuration/secrets, real MCP diagnostics, and client discovery. HTTP is opt-in; it does not automatically change the browser execution mode.
+
 Browser tools navigate/read only HTTP(S) pages and `about:blank`. `file:`, `data:`, `javascript:`, and browser-internal pages are prohibited, including preexisting attached tabs: native attachment does not grant arbitrary local-file read access. Local file content enters the browser only through explicitly host-approved, directory-scoped uploads/downloads.
 
 ## Native first, isolated explicitly
@@ -51,18 +53,15 @@ Use absolute paths and do not put API keys directly into checked-in configuratio
 
 ### Codex
 
+Follow [install.md](../install.md#3-register-mcp-idempotently) to inspect the intended name before adding it. Retain equivalent entries; preserve a conflicting entry and use an unused name or ask before replacement. With actual absolute paths and an unused name:
+
 ```sh
-codex mcp add browser -- uv --directory /ABS/PATH/browser-automation run browser-agent-mcp
+codex mcp add browser-automation -- /ABS/PATH/uv --directory /ABS/PATH/browser-automation \
+  run --env-file /ABS/PATH/browser-automation/.env browser-agent-mcp
+codex mcp get browser-automation --json
 ```
 
-In `~/.codex/config.toml`, forward only needed variables in the server's `env_vars`:
-
-```toml
-[mcp_servers.browser]
-command = "uv"
-args = ["--directory", "/ABS/PATH/browser-automation", "run", "browser-agent-mcp"]
-env_vars = ["OPENROUTER_API_KEY", "OPENAI_API_KEY", "BROWSER_NATIVE_CONSENT", "BROWSER_NATIVE_PROFILE_DIRECTORY", "BROWSER_FILES_DIRECTORY", "BROWSER_APPROVALS_FILE"]
-```
+This explicitly loads the server's private `.env`, not a client-side secret in TOML. Alternatively forward only needed host variables in that server's `env_vars` (for example `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `BROWSER_NATIVE_CONSENT`, `BROWSER_NATIVE_PROFILE_DIRECTORY`, `BROWSER_FILES_DIRECTORY`, `BROWSER_APPROVALS_FILE`). Never enable consent or file access merely to finish installation. Check initialization, tool discovery, and `doctor`; configuration listing is not a successful tool call. Reload/restart Codex for newly registered tools when needed, preserving unrelated settings and approval policy.
 
 ### Claude Code
 
@@ -91,6 +90,8 @@ Hermes explicitly controls the child environment; add the provider credential lo
 ## Portable professional skill
 
 The instruction-only `skills/browser-automation/SKILL.md` follows the Agent Skills standard. It recommends bounded Luna `run` goals rather than unnecessary step-by-step direct actions, preserves returned session IDs, distinguishes native/isolated browser choice, budgets page text/images, pauses for host-generated approvals, and requires independent completion evidence. It does not install tools or grant permissions. Tools work without it; clients may also consume server initialize instructions.
+
+Codex self-installation is covered by [install.md](../install.md#4-install-the-professional-skill-safely). Retain a link already resolving to this exact source; a foreign or broken destination is a conflict, not successful installation. Confirm actual `/skills` discovery (or the supported non-model app-server API), and restart if automatic detection has not refreshed.
 
 Install only into your intended client scope; do not overwrite an existing same-name skill. From the checkout, Codex and Claude's documented symlink support keeps the skill updated; keep the checkout at this absolute location. The guard rejects existing directories and broken symlinks alike (no `ln -f`). Hermes uses a guarded copy because symlink discovery is not assumed here.
 

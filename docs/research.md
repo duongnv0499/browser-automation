@@ -101,6 +101,16 @@ It passed (wall4.97s; installed35packages): Playwright available, provider keys 
 
 Unified real-browser artifacts are machine-local under `/tmp/browser-http-final-proof/`; scoped and Codex discovery artifacts above remain separate. No live Luna/provider call, personal Chrome profile/native consent dialog, headed desktop, nginx/TLS/public deployment, actual Facebook benchmark or matched competitor benchmark is claimed. Skills-ref and actual installed Codex skill discovery are verified; installed Claude/Hermes skill discovery remains documentation-based. The final documentation/state commit cannot embed its own hash without changing it: the hand-off reports that exact commit and push result.
 
+## Agent-directed installation contract — 2026-10-09
+
+Primary sources accessed 2026-10-09: [Codex MCP](https://developers.openai.com/codex/mcp), [Codex skills](https://developers.openai.com/codex/skills), [uv installation](https://docs.astral.sh/uv/getting-started/installation/), and [uv locking/syncing](https://docs.astral.sh/uv/concepts/projects/sync/). Codex supports CLI stdio/HTTP registration and user/project skill discovery; a skill is optional instructions, not an automatically enforced policy. Local stdio needs no persistent server daemon.
+
+Installed interface introspection (not a model task or installation smoke): `codex-cli 0.156.1`, `uv 0.11.16`; `codex mcp add NAME -- COMMAND...`, `codex mcp get NAME --json`, and HTTP `--url URL --bearer-token-env-var ENV` are present. `--env KEY=VALUE` is stdio-only. `codex app-server generate-json-schema --out /tmp/browser-setup-codex-schema` generated the actual installed JSON-RPC schemas: initialize requires `clientInfo.name`/`version`; `skills/list` accepts `cwds` and `forceReload`; `mcpServerStatus/list` exists. No paid inference is needed for skill discovery.
+
+uv's current source documents reviewed standalone scripts, package managers, `pipx` or `pip`; downloading and immediately executing an unreviewed installer is not required. `uv sync --locked` installs from the project lockfile and fails instead of updating an out-of-date lock. Extras need `--extra http`; `uv run` otherwise automatically locks/syncs. Installation preserves an existing `.env`, unrelated Codex configuration, foreign checkouts and skill destinations; HTTP client bearer environment and server token provisioning are distinct responsibilities. Provider-key presence and browser consent are readiness categories, not prerequisites for tool diagnostics.
+
+The planned authorized proof uses a fresh remote checkout and isolated `HOME`/`CODEX_HOME`, actual sync/registration/skill linking, real MCP initialization/tool listing/doctor and installed Codex skill discovery; it repeats setup and exercises preservation conflicts. Until executed, these are a plan, not success claims. Existing host uv/Codex, cached dependencies, missing paid-provider keys and no native-profile consent limit any claim of clean-machine or autonomous model-driven installation.
+
 ## What is measured
 
 No live model calls or native logged-in Chrome sessions were exercised during bootstrap. No comparative benchmark exists. Installation, unit tests, real-browser fixtures, native attachment, and live provider requests are separate evidence categories; subsequent verification records must name what actually ran and what was unavailable.

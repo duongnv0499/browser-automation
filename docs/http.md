@@ -4,27 +4,45 @@ Streamable HTTP is an **additional** transport; `browser-agent-mcp` without flag
 
 “Any agent” means a client supporting the negotiated MCP Streamable HTTP protocol and bearer headers. It does not mean every product/version, legacy SSE-only clients, or a guarantee of model/tool behavior. Codex and Claude Code document HTTP support; the existing OMP extension remains a persistent **stdio/JSONL** bridge. HTTP does not expose CDP, an OAuth service, or browser-provider API keys.
 
+For Codex “install this repo,” use [install.md](../install.md). Default installation is local stdio; request HTTP explicitly and distinguish registering an existing endpoint from installing a server on the browser host. Native versus isolated is a separate user choice.
+
 ## Install and start
 
 ```sh
-uv sync --extra http
+uv sync --locked --extra http
 # Only if explicitly choosing isolated Chromium:
 uv run playwright install chromium
 ```
 
-Generate a private token file without putting its value in command arguments or shell history (POSIX shell; no shell tracing):
+Generate a private token file **only if absent**, retaining an existing token without printing or rotating it (POSIX shell; no shell tracing). Run on the browser host; if using `BROWSER_MCP_TOKENS` instead, preserve that multi-principal configuration and do not add a conflicting single token:
 
 ```sh
 umask 077
 mkdir -p "$HOME/.config/browser-automation"
-python3 -c 'import secrets; from pathlib import Path; p=Path.home()/".config/browser-automation/mcp-token"; p.write_text(secrets.token_urlsafe(32)+"\n"); p.chmod(0o600)'
+uv run python - <<'PY'
+import os
+import secrets
+from pathlib import Path
+path = Path.home() / ".config/browser-automation/mcp-token"
+try:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+except FileExistsError:
+    token = path.read_text().strip()
+    if not token.isascii() or len(token) < 16 or any(c.isspace() for c in token):
+        raise RuntimeError("Existing token is invalid; resolve privately, do not overwrite")
+    print("Existing token retained; value not displayed")
+else:
+    with os.fdopen(fd, "w") as output:
+        output.write(secrets.token_urlsafe(32) + "\n")
+    print("Private token created; value not displayed")
+PY
 export BROWSER_MCP_TOKEN="$(cat "$HOME/.config/browser-automation/mcp-token")"
 uv run browser-agent-mcp --transport streamable-http --host 127.0.0.1 --port 8767
 # Equivalent entrypoint (same option parser):
 # uv run browser-agent mcp --transport streamable-http --host 127.0.0.1 --port 8767
 ```
 
-Keep that process alive. Supply provider credentials only in the trusted server environment if using Luna `run`; `.env` is not loaded automatically (`uv run --env-file /private/server.env ...` is explicit). A model key is not an MCP bearer token; browser-only diagnostics/control need no model key. Tokens must have at least 16 characters; absent/invalid authentication configuration fails startup. Never commit tokens, approval stores, native profile data, or screenshots. Protect environment access and do not enable shell tracing.
+Keep that foreground process alive; it is not an automatically installed service and does not guarantee persistence across logout/reboot. Use a user-managed supervisor only when explicitly approved. The export above applies to this server shell only; it does not provision a remote client or future Codex process. Supply provider credentials only in the trusted server environment if using Luna `run`; `.env` is not loaded automatically (`uv run --env-file /private/server.env ...` is explicit). A model key is not an MCP bearer token; browser-only diagnostics/control need no model key. Tokens must have at least 16 characters; absent/invalid authentication configuration fails startup. Never commit tokens, approval stores, native profile data, or screenshots. Protect token-file permissions/Windows ACLs and environment access; do not enable shell tracing or place secret exports in global shell profiles.
 
 For native sessions, the host operator must opt in in Chrome and set `BROWSER_NATIVE_CONSENT=1` and, if needed, `BROWSER_NATIVE_PROFILE_DIRECTORY` before server startup. Clients then call `connect_default`; isolated `launch` is an explicit alternative. File scopes and `BROWSER_APPROVALS_FILE` remain host-only policy. See [integration/approval setup](integrations.md).
 
@@ -44,9 +62,11 @@ The official SDK handles framing/lifecycle for current `2026-07-28` (stateless, 
 
 ## Client connections
 
-Securely provision the matching token on the client machine and export it as `BROWSER_MCP_TOKEN`; a remote client's `127.0.0.1` refers to itself, so use a protected tunnel or the HTTPS server address below.
+Securely provision the matching token on the client machine and make it available as `BROWSER_MCP_TOKEN` in the environment of the actual Codex/Claude process (not just the server). Keep values out of chat, configuration, history, and logs; preserve existing valid credentials. A remote client's `127.0.0.1` refers to itself, so use a protected tunnel or the HTTPS server address below.
 
 ### Codex
+
+Inspect `codex mcp get browser-http --json` first. Retain an enabled equivalent URL/bearer-variable entry. For a conflicting name, preserve it and choose an unused project-specific name or obtain explicit replacement approval. Add only an absent chosen name; [install.md](../install.md#3-register-mcp-idempotently) covers the complete idempotent workflow.
 
 ```sh
 codex mcp add browser-http --url http://127.0.0.1:8767/mcp --bearer-token-env-var BROWSER_MCP_TOKEN
@@ -62,7 +82,7 @@ bearer_token_env_var = "BROWSER_MCP_TOKEN"
 tool_timeout_sec = 180
 ```
 
-`browser-http` intentionally coexists with an existing stdio server named `browser`. If replacing rather than adding, review the old entry first and explicitly run `codex mcp remove browser` before adding the HTTP configuration under that name; never overwrite another server's configuration silently. Apply the same deliberate naming/scope choice in Claude.
+`browser-http` intentionally coexists with an existing stdio server named `browser` or `browser-automation`. Do not remove or replace either automatically. If replacement is explicitly authorized, review the old entry and remove only that named entry before adding its replacement; never overwrite unrelated server configuration. Apply the same deliberate naming/scope choice in Claude.
 
 Restart/reconnect the client as needed after configuration changes. A listed config is not proof that an authenticated tool call succeeded. Set a realistic client timeout for bounded `run`, rather than assuming long tasks can run indefinitely.
 

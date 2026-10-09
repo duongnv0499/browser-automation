@@ -1,0 +1,25 @@
+{
+  "worker": "SetupDocs",
+  "date": "2026-10-09",
+  "phase": "READY for parent review and coordinated SetupProof verification",
+  "owned_paths": ["install.md", "README.md", "docs/integrations.md", "docs/http.md", "agents/setup-docs.json"],
+  "unchanged": ["doc.md", "skills/browser-automation/SKILL.md", "runtime", "lockfile"],
+  "contract": {
+    "default": "Agent executes local stdio tool+skill install, stable absolute uv/checkout paths, explicit private .env; no daemon/browser attachment/paid calls by default",
+    "http": "Explicit opt-in; distinguish existing remote registration from browser-host server setup, client/server token environment separate; foreground is not reboot persistence",
+    "idempotence": "Inspect Git origin/local changes, MCP entry, skill source/link, .env/token; retain equivalents and credentials; preserve conflicts/unrelated config; no reset/force overwrite/elevation",
+    "verification": "Actual protocol initialize/list/doctor using temporary SDK diagnostic, actual Codex skill discovery and reload boundary; readiness separate from key presence and installation"
+  },
+  "primary_sources_accessed": [
+    {"url": "https://developers.openai.com/codex/mcp", "date": "2026-10-09", "contract": "stdio and Streamable HTTP, bearer_token_env_var, env_vars, user/project config"},
+    {"url": "https://developers.openai.com/codex/skills", "date": "2026-10-09", "contract": "~/.agents/skills and project .agents/skills; symlink support; /skills and explicit invocation; restart if automatic discovery stale"},
+    {"url": "https://docs.astral.sh/uv/getting-started/installation/", "date": "2026-10-09", "contract": "reviewed installer or existing authorized package manager; Python >=3.11"},
+    {"url": "https://py.sdk.modelcontextprotocol.io/client/transports/index.md", "date": "2026-10-09", "contract": "Client(StdioServerParameters); HTTP httpx2 transport; explicit environment"},
+    {"url": "https://py.sdk.modelcontextprotocol.io/protocol-versions/index.md", "date": "2026-10-09", "contract": "mode legacy explicitly initializes; mode auto discovers/falls back"}
+  ],
+  "checks_run": [],
+  "verification_owner": "SetupProof after Main authorizes; no mid-flight tests/build/lint/smoke run by SetupDocs",
+  "git_owner": "SetupProof exclusively stages/commits/pushes exact handed-off paths after parent review",
+  "proposed_commit": "docs: add safe Codex self-install runbook and agent install prompt",
+  "remaining": "Parent review, fresh-clone proof, owned-doc repairs if actual proof finds discrepancies; no autonomous paid model/native/browser claim"
+}

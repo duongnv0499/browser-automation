@@ -2,6 +2,8 @@
 
 ## 0.1.0 — Unreleased
 
+- Add an agent-followable `install.md` entrypoint and prominent natural-language installation prompt: configure the local stdio MCP and portable skill safely, preserve existing credentials/configuration, distinguish diagnostics from live-model/browser readiness, and make HTTP an explicit deployment choice rather than an installer daemon.
+
 - Add an instruction-only portable browser-automation skill for bounded decision-first Luna workflows, explicit browser choice, persistent IDs, context/privacy budgets, exact host approvals and independent rendered evidence; document current Codex/Claude/Hermes discovery without a mandatory-skill claim.
 - Document optional authenticated Streamable HTTP deployment on the browser host, current/legacy protocol boundaries, compatible Codex/Claude and SDK configuration, per-identity ownership, bounds and a TLS reverse-proxy recipe; preserve default stdio and the OMP stdio bridge.
 - Verify the HTTP/skill release with 81 unified tests, official SDK modern/legacy real-browser HTTP and plain localhost proxy fixtures, reference skill validation and installed Codex discovery; verify sdist skill/wheel assets and actual clean installed-wheel HTTP startup/tool listing/doctor. Record scoped fixture repairs and remaining live-model, personal-profile, installed-wheel browser-launch and nginx/TLS limits honestly.

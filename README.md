@@ -12,20 +12,33 @@ Guarded browser control and a multimodal Luna Decisions agent for Python, Codex,
 
 These are design capabilities, not claims of better performance than Jev or Codex. Supported surfaces, limitations, and verification evidence are documented below.
 
+## Let your coding agent install
+
+Paste this into Codex (with permission to install local tools):
+
+> Install https://github.com/duongnv0499/browser-automation for me. Read its install.md and perform the installation, not just give me commands. Set up the local stdio MCP server and the browser-automation skill, preserve existing configuration and secrets, and verify real tool discovery and doctor. Do not attach my Chrome or make paid model calls without my explicit consent.
+
+For HTTP instead, add: “Use Streamable HTTP; connect to my existing server, or set up the server on the browser host only if I ask.” The agent must distinguish server setup from client registration and provision bearer credentials privately.
+
+[install.md](install.md) is the complete self-install runbook: stable paths, dependencies, idempotent MCP/skill setup, protocol checks, and readiness reporting. Local stdio needs no running daemon. A fresh/reloaded Codex session may be needed to expose newly registered tools; installation alone does not grant browser or action consent.
+
 ## Install
 
-Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/). The manual example below assumes a new checkout; for an existing install, preserve local changes and follow [the idempotent runbook](install.md).
 
 ```bash
 git clone https://github.com/duongnv0499/browser-automation.git
 cd browser-automation
 uv sync --locked
-cp .env.example .env
-# Edit .env: set OPENROUTER_API_KEY or OPENAI_API_KEY only if using a model.
-uv run browser-agent doctor
+# Create only when absent; retain existing credentials and broken-link conflicts.
+if [ ! -e .env ] && [ ! -L .env ]; then
+  (umask 077; set -C; cat .env.example > .env)
+fi
+# Edit .env privately: set a provider key only if using a model.
+uv run --env-file .env browser-agent doctor
 ```
 
-For **isolated Chromium** also run:
+Only if explicitly choosing **isolated Chromium**, also run:
 
 ```bash
 uv run playwright install chromium
@@ -108,7 +121,7 @@ For isolation use `await BrowserSession.launch(headless=False)` explicitly. See 
 
 ## Run MCP once, connect compatible agents
 
-On the **browser host**, install `uv sync --extra http`, securely configure `BROWSER_MCP_TOKEN`, then start:
+On the **browser host**, install `uv sync --locked --extra http`, securely configure `BROWSER_MCP_TOKEN`, then start:
 
 ```sh
 uv run browser-agent-mcp --transport streamable-http --host 127.0.0.1 --port 8767
@@ -126,20 +139,16 @@ Use an absolute checkout path so client working directories do not matter. Brows
 
 ### Codex
 
+Use the [self-install runbook](install.md) for safe, idempotent registration and skill discovery. For an inspected unused name and discovered absolute paths:
+
 ```bash
-codex mcp add browser -- uv --directory /ABSOLUTE/PATH/browser-automation run browser-agent-mcp
-codex mcp list
+codex mcp add browser-automation -- /ABSOLUTE/PATH/uv \
+  --directory /ABSOLUTE/PATH/browser-automation \
+  run --env-file /ABSOLUTE/PATH/browser-automation/.env browser-agent-mcp
+codex mcp get browser-automation --json
 ```
 
-In `~/.codex/config.toml`, optionally forward selected variables rather than hardcoding secrets:
-
-```toml
-[mcp_servers.browser]
-command = "uv"
-args = ["--directory", "/ABSOLUTE/PATH/browser-automation", "run", "browser-agent-mcp"]
-env_vars = ["OPENROUTER_API_KEY", "OPENAI_API_KEY", "BROWSER_NATIVE_CONSENT", "BROWSER_NATIVE_PROFILE_DIRECTORY"]
-tool_timeout_sec = 180
-```
+Replace all paths with actual paths. Retain equivalent existing entries; do not overwrite a conflicting name or unrelated configuration. This explicitly loads the private `.env`; alternatively Codex's `env_vars` forwards selected names from its environment. Neither listing configuration nor key presence proves a working MCP tool or paid provider call: complete the runbook's protocol/`doctor` and skill-discovery checks, then reload/restart if needed.
 
 ### Claude Code
 
