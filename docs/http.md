@@ -49,18 +49,20 @@ Securely provision the matching token on the client machine and export it as `BR
 ### Codex
 
 ```sh
-codex mcp add browser --url http://127.0.0.1:8767/mcp --bearer-token-env-var BROWSER_MCP_TOKEN
+codex mcp add browser-http --url http://127.0.0.1:8767/mcp --bearer-token-env-var BROWSER_MCP_TOKEN
 codex mcp list
 ```
 
 Equivalent secret-free `~/.codex/config.toml`:
 
 ```toml
-[mcp_servers.browser]
+[mcp_servers.browser-http]
 url = "http://127.0.0.1:8767/mcp"
 bearer_token_env_var = "BROWSER_MCP_TOKEN"
 tool_timeout_sec = 180
 ```
+
+`browser-http` intentionally coexists with an existing stdio server named `browser`. If replacing rather than adding, review the old entry first and explicitly run `codex mcp remove browser` before adding the HTTP configuration under that name; never overwrite another server's configuration silently. Apply the same deliberate naming/scope choice in Claude.
 
 Restart/reconnect the client as needed after configuration changes. A listed config is not proof that an authenticated tool call succeeded. Set a realistic client timeout for bounded `run`, rather than assuming long tasks can run indefinitely.
 
@@ -69,7 +71,7 @@ Restart/reconnect the client as needed after configuration changes. A listed con
 Add the HTTP server without a plaintext secret, then configure its Authorization header by environment reference:
 
 ```sh
-claude mcp add --transport http browser http://127.0.0.1:8767/mcp
+claude mcp add --transport http browser-http http://127.0.0.1:8767/mcp
 ```
 
 For a project `.mcp.json` (review workspace trust prompts):
@@ -77,7 +79,7 @@ For a project `.mcp.json` (review workspace trust prompts):
 ```json
 {
   "mcpServers": {
-    "browser": {
+    "browser-http": {
       "type": "http",
       "url": "http://127.0.0.1:8767/mcp",
       "headers": {"Authorization": "Bearer ${BROWSER_MCP_TOKEN}"}
@@ -88,7 +90,7 @@ For a project `.mcp.json` (review workspace trust prompts):
 
 ```sh
 claude mcp list
-claude mcp get browser
+claude mcp get browser-http
 ```
 
 The `${BROWSER_MCP_TOKEN}` text is intentional: Claude expands it from its environment. Do not substitute the actual token into the file or a `--header` command argument. Project configuration requires explicit trust/approval; avoid conflicting same-name local/user entries. The client must support the selected protocol revision; these examples are documented setup, not a claim of a paid Claude/Codex model run.
@@ -171,3 +173,7 @@ Use `https://browser.example.com/mcp` in clients. The app checks the actual Host
 ## Shared workflow
 
 All transports expose the same `doctor`, session/tab, `observe`, `text`, guarded `act`, `run`, host-approved action/file and cleanup tools; screenshots remain separate MCP image blocks. Install the optional [portable skill](../skills/browser-automation/SKILL.md) for decision-first goal setting, context budgets, safe approvals and independent evidence. The skill is guidance, not an access-control requirement; server initialize instructions also guide clients that do not load skills. See [architecture](architecture.md) and [dated research/evidence](research.md).
+
+## Exercised verification boundary
+
+Authorized scoped checks exercised real uvicorn + official SDK clients negotiating modern `2026-07-28` and legacy `2025-11-25`, guarded fill/click with rendered `HTTP SUCCESS` and separate changed PNGs, identity/session isolation, authentication/Host/Origin/body/version rejection, cancellation/idle lifecycle, and preservation of disposable preexisting attached tabs on cleanup. A real **two-socket localhost HTTP relay** plus SDK/browser screenshot also ran; it was not nginx, HTTPS, certificate issuance or a public deployment. The documented nginx/TLS recipe remains unexercised. Initial fixture cleanup/proxy failures and mutation-scoped retests are recorded in [research](research.md); a final unified result must not be inferred by adding individual pass counts. No live Luna, personal logged-in profile, native Chrome consent dialog or paid Codex/Claude model task is claimed.

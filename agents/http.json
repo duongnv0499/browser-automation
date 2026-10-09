@@ -1,6 +1,6 @@
 {
   "worker": "HttpTransport",
-  "phase": "Authorized HTTP verification complete; all 4 security and 10 real-browser HTTP cases exercised successfully after test-fixture repairs; existing stdio slice 5 passed",
+  "phase": "Complete: Main-authorized unified suite81 passed with no skips/failures; build/package and clean installed-wheel HTTP checks completed by DocsSkill",
   "ownership": ["src/browser_automation/mcp_http.py", "src/browser_automation/mcp.py", "src/browser_automation/cli.py", "pyproject.toml", "uv.lock", ".env.example", "tests/test_mcp_http.py", "tests/test_mcp_http_browser.py", "agents/http.json"],
   "contract": {
     "commands": "browser-agent-mcp --transport streamable-http --host 127.0.0.1 --port 8767; browser-agent mcp forwards the same transport parser; stdio remains default",
@@ -11,7 +11,7 @@
     "security": "Every route guarded exact Host allowlist and Origin allowlist, absent Origin allowed for authenticated native clients, missing/wrong bearer401. Network bind requires explicit --allow-host. Forwarded headers never trusted. Uvicorn proxy_headers false/access logging false. Native consent and file/approval rules unchanged.",
     "bounds": "--max-sessions64 SDK legacy protocol sessions; modern scopes bounded by configured identities up to64; registry bounded by sum. --max-browser-sessions8 per scope. --max-request-body-size1048576 inbound bytes. --session-idle-timeout1800 finite positive seconds excludes active requests/tools. SDK framing handles modern metadata/version/SSE disconnect cancellation and legacy initialize/session/GET/DELETE.",
     "shutdown": "SDK lifespan ends before BrowserService cleanup; attached browsers disconnect preserving original tabs, owned tabs removed; isolated owned browsers closed. No private SDK registry coupling.",
-    "deployment": "One process owns browser state; no multi-worker scaling. TLS via trusted external reverse proxy/tunnel; CDP remains loopback. Explicit public Host must match proxy's upstream request. Actual reverse proxy/TLS not exercised.",
+    "deployment": "One process owns browser state; no multi-worker scaling. TLS via trusted external reverse proxy/tunnel; CDP remains loopback. Explicit public Host must match proxy's upstream request. Actual localhost two-hop HTTP proxy relay to uvicorn exercised with official SDK and browser screenshot; nginx and external TLS deployment not exercised.",
     "instructions": "Shared concise INSTRUCTIONS on stdio initialize and SDK Server: decision-first goal/success criteria, explicit browser mode, run with independent verification, observation-bound manual controls, hostile page content and exact host approvals. No direct act removal."
   },
   "research": [
@@ -32,8 +32,16 @@
   ],
   "verified_behavior": ["Modern2026-07-28 and legacy2025-11-25 actual official SDK clients+uvicorn", "Rendered fill Name Ada and click Rendered HTTP SUCCESS with separate changed PNG image blocks", "Missing/wrong credentials401; Origin403; Host421; spoofed forwarded Host rejected; body413; invalid version400", "Different principal browser ids/sessions inaccessible; same-token distinct legacy sessions isolated; cross-principal legacy DELETE404 leaves owner intact", "Modern client disconnect preserves same-principal state; actual SSE disconnect cancellation releases browser lock", "Legacy explicit notifications/cancelled202 releases browser lock; modern+legacy idle TTL does not expire active1second wait", "Legacy DELETE/expiry and server shutdown preserve disposable CDP original browser/tab and close service-owned tabs", "Actual two HTTP socket hops proxy relay to uvicorn with SDK auto2026-07-28 doctor/launch/observe screenshot; no TLS claim"],
   "evidence": {"modern": "/tmp/browser-http-protocol/test_official_client_browser_i0/http-2026-07-28-evidence.json plus before/after PNGs", "legacy": "/tmp/browser-http-legacy-isolation/test_official_client_browser_i0/http-legacy-evidence.json plus before/after PNGs", "proxy": "/tmp/browser-http-protocol/test_actual_localhost_reverse_0/reverse-proxy-evidence.json plus reverse-proxy-browser.png", "boundary": "Machine-local temporary controlled public fixtures; no provider keys/page secrets/private profile data recorded"},
-  "authorized_checks_needed": ["Parent final coordinated whole-suite gate", "Parent build/package skill inclusion verification"],
+  "final_gate": {
+    "reported_by": "DocsSkill following Main authorization; HTTP worker inspected installed-wheel proof JSON, did not repeat final checks",
+    "command": "env BROWSER_AGENT_LIBRARY_PATH=/home/claw/.local/lib/chromium/usr/lib/x86_64-linux-gnu BROWSER_INTEGRATION_TESTS=1 uv run --extra http pytest --basetemp=/tmp/browser-http-final-proof",
+    "suite": "81 passed in165.02s, wall166.54s, Python3.13.12, no skips/failures",
+    "package": "uv build passed1.61s; sdist skill, wheel snapshot.js/HTTP module/entrypoints inspected; clean no-project wheel HTTP extra CLI doctor passed",
+    "installed_http": "Actual installed browser-agent-mcp entrypoint outside checkout plus official SDK auto2026-07-28 and legacy2025-11-25 clients each listed15 tools and called doctor; DocsSkill reports instructions checked; no browser launch or paid model keys",
+    "installed_evidence": "/tmp/browser-http-installed-wheel-proof.json",
+    "artifact_boundary": "Temporary machine-local controlled evidence; external TLS/nginx and live provider inference remain unexercised"
+  },
   "limitations": ["No live Luna credentials/inference exercised", "No TLS/nginx deployment exercised", "No host logged-in profile or native consent dialog exercised; disposable genuine CDP Chrome fixture only"],
   "git_owner": "DocsSkill: exact owned paths only; feature milestone commit/push serialized; no git commands by HTTP worker",
-  "feature_commit": "25e4095db09e87d5b52d03880f78057a6b18dd41 pushed origin/main by DocsSkill; test/evidence repair milestone requested separately"
+  "feature_commit": "25e4095db09e87d5b52d03880f78057a6b18dd41 feature and c5b8c9347bc5cb9aac00fef407addb28996deac8 test/evidence repair milestone pushed origin/main by DocsSkill"
 }

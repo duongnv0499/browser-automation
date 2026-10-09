@@ -47,8 +47,59 @@ uvx --from 'git+https://github.com/agentskills/agentskills.git#subdirectory=skil
 
 It returned **Valid skill**; uv resolved the reference tool at upstream commit `69ef37e9424c0a7ea9dd2293b559e43ec8176379`. A separate structural smoke checked required frontmatter/name/description/compatibility bounds, the 48-line SKILL.md, zero external local skill-resource dependencies, and existence of 21 local documentation link targets. It did not pin source wording or evaluate model compliance.
 
+The exact documented installation shell block also executed successfully in a separate temporary HOME: Codex/Claude symlinks and Hermes's guarded copy contained the intended SKILL.md; running it again preserved all existing destinations; replacing the Codex destination with a deliberately broken symlink and rerunning preserved that symlink too. No real user HOME was modified. Installed-client inspection found Codex and Claude binaries, but no Hermes binary; Claude's `--help` exposed no non-model skills-list subcommand, so no paid invocation was attempted to manufacture discovery evidence.
+
 Actual installed **Codex app-server** discovery also passed: a temporary project `.agents/skills/browser-automation` symlink to the source skill, isolated temporary HOME/CODEX_HOME, and secret-stripped child environment were used. Only `initialize`, `initialized`, and `skills/list` (`cwds`, `forceReload:true`) were sent; the response returned `browser-automation`, `enabled:true`, `scope:repo`, and the correct source path. No thread/turn or paid model was invoked, and user configuration was unchanged. Machine-local evidence is `/tmp/browser-skill-proof-qjbtxeun/skills-list.json`. Protocol source: [Codex app-server](https://developers.openai.com/codex/app-server), accessed 2026-10-09. This proves that installed Codex discovers the skill, not that an agent follows every instruction. Actual installed Claude/Hermes discovery remains unexercised; their paths/invocations are documentation-based.
 
+
+### Authorized scoped HTTP verification
+
+HttpTransport's executed scoped checks (recorded in `../agents/http.json`) were:
+
+| Check/run | Actual outcome |
+| --- | --- |
+| `uv run --extra http pytest -q tests/test_mcp_http.py` | 4 passed in 2.34s: ASGI authentication/security/protocol boundaries. |
+| Initial real HTTP + existing stdio slice | Existing stdio 5 passed; six HTTP cleanup fixture failures in the 42.22s run expected exit 0 from uvicorn after SIGTERM, which returns -15 after graceful shutdown. Browser/lifecycle assertions reached cleanup; fixture now requires `Application shutdown complete` and no ERROR logs before accepting -15. |
+| Expanded/repaired HTTP cases | 9 passed, 1 reverse-proxy fixture failure in 41.11s: relay rewrote only the first keepalive request's Host. |
+| Corrected relay `Connection: close` | Actual two-hop localhost proxy case 1 passed in 5.53s. |
+| Explicit negotiated-protocol evidence | Modern/legacy guarded browser and real proxy subset 3 passed in 12.96s. |
+| Same-bearer legacy-session isolation | Legacy guarded browser case 1 passed in 5.87s. |
+
+All ten actual HTTP browser cases were exercised successfully across these mutation-scoped runs, **not** one invented “10 passed” output. No production HTTP implementation repair was needed during that scoped gate. Official SDK + uvicorn actually negotiated modern **2026-07-28** and legacy **2025-11-25**; filled Name=`Ada`, clicked, and observed rendered `HTTP SUCCESS` with separate PNG image blocks changing from 9,112 to 10,992 bytes. Checks covered distinct identities and same-token distinct legacy sessions, missing/wrong bearer 401, Origin 403, Host 421/forwarded Host rejection, body 413, invalid version 400, modern SSE disconnect and legacy cancellation, active-operation idle protection, expiry/DELETE/shutdown preservation of disposable attached browser/preexisting tabs. A same-principal modern disconnect retained browser state, as designed.
+
+Scoped machine-local artifacts: modern `/tmp/browser-http-protocol/test_official_client_browser_i0/http-2026-07-28-evidence.json` plus before/after PNGs; legacy `/tmp/browser-http-legacy-isolation/test_official_client_browser_i0/http-legacy-evidence.json` plus PNGs; proxy `/tmp/browser-http-protocol/test_actual_localhost_reverse_0/reverse-proxy-evidence.json` and `reverse-proxy-browser.png`. Main opened the modern rendered PNG (`HTTP SUCCESS`, Name=`Ada`) and metadata confirming cross-principal `unknown_session`; proxy metadata records two real HTTP hops and `tls:false`. The proxy is a real localhost relay, **not nginx or TLS**. No public HTTPS deployment, personal logged-in profile/Chrome native consent dialog, live Luna/provider, or paid agent turn is inferred.
+
+Implementation milestone `25e4095db09e87d5b52d03880f78057a6b18dd41` and scoped fixture/evidence milestone `c5b8c9347bc5cb9aac00fef407addb28996deac8` were successfully pushed to `origin/main` by DocsSkill using exact handed-off HTTP paths. Portable skill milestone `d2dd45e96ddfa2d5ef9a8c02d400764b4ad2bb10`, client/deployment docs `e01f349f91084b4208e6fae4be8bf064e54fc09b`, and skill-validation evidence `d8458bfb9f9e5076971a742f12672614eaaabaf2` were also successfully pushed. The final unified gate is recorded separately rather than inferred from these scoped counts.
+
+### Final HTTP/skill unified gate — 2026-10-09
+
+After both workers' scoped results stabilized, Main explicitly authorized the final unified suite and package/installed-wheel checks. Runtime source/fixtures were at pushed commit `c5b8c9347bc5cb9aac00fef407addb28996deac8`; subsequent edits are documentation/state only.
+
+```sh
+env BROWSER_AGENT_LIBRARY_PATH=/home/claw/.local/lib/chromium/usr/lib/x86_64-linux-gnu \
+  BROWSER_INTEGRATION_TESTS=1 uv run --extra http pytest \
+  --basetemp=/tmp/browser-http-final-proof
+uv build
+```
+
+The authoritative unified output was **81 passed in 165.02s** (wall 166.54s), Python 3.13.12/pytest 9.1.1, all nine test files and no reported skips/failures. This includes all four HTTP security cases, all ten HTTP real-browser cases together, the existing stdio/CLI/OMP cases and earlier browser/provider/agent guards. Host browser libraries were explicitly configured; this path is not a portable package default.
+
+`uv build` succeeded in 1.61s, producing the 0.1.0 sdist/wheel. Archive inspection confirmed `skills/browser-automation/SKILL.md` (6.8KiB) in the **sdist**, and `browser_automation/snapshot.js` (7.9KiB), `mcp_http.py`, plus console entrypoints `browser-agent`/`browser-agent-mcp` in the **wheel**. The portable skill need not be installed inside a Python wheel's import package. Artifact SHA-256: sdist `8263d8b25ba7ea0d7b4091b540f84fe53805b7dd9f252ca0b4df08124a163d1c`; wheel `a320ae9089846ae47cd4b83fa063d58668790465907adc72ac5aaa5ed632aca7`. Artifacts were built before the final documentation/state release commit; rebuild hashes may differ.
+
+Clean installed-wheel command, executed from `/tmp`:
+
+```sh
+env -i HOME=/tmp/browser-http-wheel-home \
+  PATH=/home/claw/.local/bin:/usr/local/bin:/usr/bin:/bin \
+  UV_CACHE_DIR=/tmp/browser-http-wheel-cache \
+  uv run --no-project \
+  --with 'browser-automation[http] @ file:///home/claw/browser-automation/dist/browser_automation-0.1.0-py3-none-any.whl' \
+  browser-agent doctor
+```
+
+It passed (wall4.97s; installed35packages): Playwright available, provider keys absent, no sessions, native consent false. In the same isolated wheel environment, an inline no-project Python probe generated an ephemeral bearer token without printing it, started the actual installed `browser-agent-mcp --transport streamable-http` entrypoint on a free loopback port, and used official SDK `Client(streamable_http_client(...,http_client=httpx2.AsyncClient(...)))` in auto and legacy modes. Both listed15tools, returned server instructions and successful `doctor`, and negotiated **2026-07-28**/**2025-11-25** respectively. Package `__file__` resolved under `/tmp/browser-http-wheel-cache/.../lib/python3.12/site-packages`, **not the checkout**. Graceful shutdown logged `Application shutdown complete` with no ERROR and exit-15 (expected uvicorn SIGTERM semantics). No model key, native consent, browser-library override or checkout imports were supplied; **installed-wheel browser launch was not exercised**. Evidence: `/tmp/browser-http-installed-wheel-proof.json`. This validates installed HTTP startup/client transport, not only package imports and not a paid Codex/Claude invocation.
+
+Unified real-browser artifacts are machine-local under `/tmp/browser-http-final-proof/`; scoped and Codex discovery artifacts above remain separate. No live Luna/provider call, personal Chrome profile/native consent dialog, headed desktop, nginx/TLS/public deployment, actual Facebook benchmark or matched competitor benchmark is claimed. Skills-ref and actual installed Codex skill discovery are verified; installed Claude/Hermes skill discovery remains documentation-based. The final documentation/state commit cannot embed its own hash without changing it: the hand-off reports that exact commit and push result.
 
 ## What is measured
 
