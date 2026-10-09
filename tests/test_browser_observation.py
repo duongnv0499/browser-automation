@@ -155,3 +155,23 @@ async def test_hidden_alert_descendants_not_rendered_evidence():
         assert visible['visible_alerts'][0]['text'] == 'Something went wrong. Try again.'
         assert visible['visible_alerts'][0]['source'] == 'dom'
         assert visible['page_state']['state'] == 'error'
+
+
+@pytest.mark.asyncio
+async def test_protected_frame_points_and_unbound_keyboard_rejected():
+    async with await BrowserSession.launch(headless=True) as browser:
+        tab = (await browser.new_tab())['id']
+        page = browser._page(tab)
+        await page.set_content('''<div role="button" tabindex="0" aria-label="Frame wrapper" style="width:320px;height:180px"><iframe style="width:300px;height:160px" src="data:text/html,<button>Protected control</button>"></iframe></div>
+        <button onclick="document.body.dataset.clicked='yes'">Allowed parent</button>''')
+        observation = await browser.observe(tab, screenshot=True)
+        wrapper = next(e for e in observation['elements'] if e['name'] == 'Frame wrapper')
+        with pytest.raises(UnsafeActionError, match='skipped protected frame'):
+            await browser.act(tab, {'operation': 'click', 'target': wrapper['id'], 'observation_id': observation['id']})
+        await page.evaluate("document.querySelector('iframe').focus()")
+        assert await page.evaluate("document.activeElement.tagName") == 'IFRAME'
+        with pytest.raises(UnsafeActionError, match='Unbound keyboard'):
+            await browser.act(tab, {'operation': 'press', 'key': 'Tab', 'observation_id': observation['id']})
+        allowed = next(e for e in observation['elements'] if e['name'] == 'Allowed parent')
+        await browser.act(tab, {'operation': 'click', 'target': allowed['id'], 'observation_id': observation['id']})
+        assert await page.get_attribute('body', 'data-clicked') == 'yes'
