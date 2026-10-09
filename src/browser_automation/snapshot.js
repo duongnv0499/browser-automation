@@ -12,6 +12,18 @@
   const maxTextChars = options.max_text_chars ?? 1000000;
   const maxElements = options.max_elements ?? 2000;
   const maxNodes = options.max_nodes ?? 20000;
+  const clipsOverflow = el => {
+    const s=getComputedStyle(el), root=document.documentElement;
+    if(el===root || s.display==='contents' || s.display==='inline') return false;
+    if(el===document.body && root?.tagName==='HTML') {
+      const r=getComputedStyle(root);
+      // CSS Overflow 3: body overflow propagates to the viewport, not its
+      // potentially zero-height box, unless root/body containment disables it.
+      if(r.overflowX==='visible' && r.overflowY==='visible' && r.contain==='none' && s.contain==='none') return false;
+    }
+    return true;
+  };
+  state.clipsOverflow = clipsOverflow;
   const visible = (el, rect = el.getBoundingClientRect()) => {
     const style = getComputedStyle(el);
     if (style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity) === 0 || rect.width <= 0 || rect.height <= 0) return false;
@@ -20,15 +32,30 @@
       const s=getComputedStyle(parent),r=parent.getBoundingClientRect();
       if(s.display==='none'||Number(s.opacity)===0) return false;
       // Boxless custom hosts and display:contents do not establish clipping boxes.
-      const clips = s.display !== 'contents' && r.width > 0 && r.height > 0;
+      const clips = clipsOverflow(parent);
       if(clips && /hidden|clip|auto|scroll/.test(s.overflowX)){left=Math.max(left,r.left+parent.clientLeft);right=Math.min(right,r.left+parent.clientLeft+parent.clientWidth);}
       if(clips && /hidden|clip|auto|scroll/.test(s.overflowY)){top=Math.max(top,r.top+parent.clientTop);bottom=Math.min(bottom,r.top+parent.clientTop+parent.clientHeight);}
     }
     return right>left&&bottom>top;
   };
+  const renderedText = (root, limit=300) => {
+    const chunks=[];let chars=0,nodes=0;
+    const scan=el=>{
+      if(chars>=limit || ++nodes>1000 || ['SCRIPT','STYLE','NOSCRIPT','TEMPLATE'].includes(el.tagName)) return;
+      for(const node of el.childNodes || []) {
+        if(chars>=limit || ++nodes>1000) break;
+        if(node.nodeType===Node.TEXT_NODE && node.textContent.trim()) {
+          const range=document.createRange();range.selectNodeContents(node);
+          if(visible(el,range.getBoundingClientRect())) {const value=node.textContent.trim().slice(0,limit-chars);chunks.push(value);chars+=value.length;}
+        } else if(node.nodeType===Node.ELEMENT_NODE) scan(node);
+      }
+      if(el.shadowRoot) for(const child of el.shadowRoot.children) scan(child);
+    };
+    scan(root);return chunks.join(' ').replace(/\s+/g,' ').trim().slice(0,limit);
+  };
   const label = el => {
     const labelled = (el.getAttribute('aria-labelledby') || '').split(/\s+/).map(id => (el.getRootNode().getElementById?.(id)||document.getElementById(id))?.textContent || '').join(' ').trim();
-    return (el.getAttribute('aria-label') || labelled || Array.from(el.labels || []).map(x => x.textContent).join(' ') || el.getAttribute('alt') || el.getAttribute('title') || el.getAttribute('placeholder') || el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+    return (el.getAttribute('aria-label') || labelled || Array.from(el.labels || []).map(x => renderedText(x)).join(' ') || el.getAttribute('alt') || el.getAttribute('title') || el.getAttribute('placeholder') || renderedText(el)).replace(/\s+/g, ' ').trim().slice(0, 300);
   };
   const fastHash = s => {
     let h = 0;
@@ -47,6 +74,7 @@
   };
   state.fingerprint = el => JSON.stringify([el.tagName,el.type||el.getAttribute('type'),el.getAttribute('role'),label(el),fieldValue(el),el.href||'',el.form?.action||'',el.form?.method||'',el.getAttribute('formaction'),el.getAttribute('formmethod'),el.disabled,el.readOnly,el.multiple]);
   const elements = [], text = [], live = new Map(), fields = [];
+  const visibleAlerts = [];
   let visitedNodes = 0, textChars = 0, sourceTruncated = false, omittedElements = 0;
   let editableNonempty = false, sensitiveFields = false, renderedTextNodes = 0;
   const walk = root => {
@@ -54,14 +82,20 @@
     for (const el of root.children || []) {
       if (++visitedNodes > maxNodes) { sourceTruncated = true; break; }
       if (['SCRIPT','STYLE','NOSCRIPT','TEMPLATE'].includes(el.tagName)) continue;
-      if(el.matches('input,select,textarea,[contenteditable="true"]')) fields.push(state.fingerprint(el));
+      if(el.matches('input,select,textarea') || el.isContentEditable) fields.push(state.fingerprint(el));
       const isVisible = visible(el);
-      if (isVisible && el.matches('input,textarea,[contenteditable="true"]')) {
-        editableNonempty ||= !!String(el.value || (el.isContentEditable ? el.textContent : '')).trim();
-        sensitiveFields ||= sensitive(el);
-      }
+      // Offscreen drafts can also be destroyed by reload. Export flags, not values.
+      const editable = el.isContentEditable || el.matches('textarea') ||
+        (el.matches('input') && !['hidden','button','submit','reset','checkbox','radio','file','range','color','image'].includes(el.type));
+      if (editable && !el.readOnly) editableNonempty ||= !!String(el.value || (el.isContentEditable ? el.textContent : '')).trim();
+      sensitiveFields ||= sensitive(el);
       if (isVisible) {
         const tag = el.tagName.toLowerCase(), type = el.getAttribute('type') || '', role = el.getAttribute('role') || ({a:'link',button:'button',select:'combobox',textarea:'textbox',input:type==='checkbox'?'checkbox':type==='radio'?'radio':'textbox',canvas:'canvas'}[tag] || tag);
+        if (['alert','status'].includes(role) && visibleAlerts.length < 8) {
+          const r=el.getBoundingClientRect();
+          const text=renderedText(el,240);
+          if(text) visibleAlerts.push({role,text,bounds:{x:r.x,y:r.y,width:r.width,height:r.height},source:'dom'});
+        }
         const ops = [];
         if (!el.disabled && !el.closest('[inert]')) {
           if (['a','button','input','select','textarea','summary'].includes(tag) || el.hasAttribute('onclick') || el.tabIndex >= 0 || ['button','link','checkbox','radio','menuitem','tab','switch','option'].includes(role)) ops.push('click','hover','press');
@@ -70,7 +104,8 @@
           if (tag === 'input' && type === 'file') ops.push('upload');
           if (el.draggable) ops.push('drag');
         }
-        if (el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1) ops.push('scroll');
+        const scrollStyle=getComputedStyle(el);
+        if (/auto|scroll/.test(scrollStyle.overflowY) && el.scrollHeight > el.clientHeight + 1 || /auto|scroll/.test(scrollStyle.overflowX) && el.scrollWidth > el.clientWidth + 1) ops.push('scroll');
         if (tag === 'canvas') ops.push('click','hover','drag');
         if (ops.length) {
           let id = state.ids.get(el); if (!id) {id = String(state.next++); state.ids.set(el,id);}
@@ -119,5 +154,5 @@
   };
   walk(document);
   state.nodes = live;
-  return {document:state.token,elements,omitted_elements:omittedElements,fields,text:text.join('\n'),source_truncated:sourceTruncated,viewport:{width:innerWidth,height:innerHeight},url:location.href,title:document.title,ready_state:document.readyState,editable_nonempty:editableNonempty,sensitive_fields:sensitiveFields,visited_nodes:visitedNodes,rendered_text_nodes:renderedTextNodes};
+  return {document:state.token,elements,omitted_elements:omittedElements,fields,text:text.join('\n'),source_truncated:sourceTruncated,viewport:{width:innerWidth,height:innerHeight},url:location.href,title:document.title,ready_state:document.readyState,editable_nonempty:editableNonempty,sensitive_fields:sensitiveFields,visited_nodes:visitedNodes,rendered_text_nodes:renderedTextNodes,visible_alerts:visibleAlerts};
 }

@@ -199,7 +199,7 @@ async def test_screenshot_canvas_refined_visual_and_proof(browser, tmp_path):
     (destination/'browser-proof.png').write_bytes(base64.b64decode(proof['screenshot']))
     (destination/'browser-proof.json').write_text(json.dumps({'kind':'real_chromium_headless_browser_only','text':proof['text'],'name':element(proof,'Name')['value'],'canvas':'Canvas clicked','observe_screenshot_ms':observe_ms,'click_visual_ms':result['latency_ms'],'live_provider':False},indent=2))
     await page.evaluate("document.querySelector('canvas').getContext('2d').fillRect(0,0,160,80)")
-    grid = next(e for e in proof['elements'] if e['role']=='visual-region')
+    grid = next(e for e in proof['elements'] if e['role']=='visual-region' and e['bounds']['x']<=x<e['bounds']['x']+e['bounds']['width'] and e['bounds']['y']<=y<e['bounds']['y']+e['bounds']['height'])
     with pytest.raises(StaleObservationError):
         await session.act(tab, {'operation':'click','observation_id':proof['id'],'target':grid['id']})
 

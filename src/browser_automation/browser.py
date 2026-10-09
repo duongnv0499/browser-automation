@@ -78,7 +78,7 @@ _GUARD = """({token,node,point,signature,clip}) => {
  if(e && signature!==s.fingerprint(e)) return {error:'target semantics changed'};
  const r=e?e.getBoundingClientRect():null;
  let left=e?Math.max(clip.left,r.left):clip.left,top=e?Math.max(clip.top,r.top):clip.top,right=e?Math.min(clip.right,r.right):clip.right,bottom=e?Math.min(clip.bottom,r.bottom):clip.bottom;
- for(let p=e?.parentElement||e?.getRootNode().host;p;p=p.parentElement||p.getRootNode().host){const s=getComputedStyle(p),pr=p.getBoundingClientRect();if(/hidden|clip|auto|scroll/.test(s.overflowX)){left=Math.max(left,pr.left+p.clientLeft);right=Math.min(right,pr.left+p.clientLeft+p.clientWidth);}if(/hidden|clip|auto|scroll/.test(s.overflowY)){top=Math.max(top,pr.top+p.clientTop);bottom=Math.min(bottom,pr.top+p.clientTop+p.clientHeight);}}
+ for(let p=e?.parentElement||e?.getRootNode().host;p;p=p.parentElement||p.getRootNode().host){const style=getComputedStyle(p),pr=p.getBoundingClientRect();if(style.display==='none'||Number(style.opacity)===0)return {error:'disabled or hidden target'};const clips=s.clipsOverflow(p);if(clips&&/hidden|clip|auto|scroll/.test(style.overflowX)){left=Math.max(left,pr.left+p.clientLeft);right=Math.min(right,pr.left+p.clientLeft+p.clientWidth);}if(clips&&/hidden|clip|auto|scroll/.test(style.overflowY)){top=Math.max(top,pr.top+p.clientTop);bottom=Math.min(bottom,pr.top+p.clientTop+p.clientHeight);}}
  const x=point?point.x:(left+right)/2, y=point?point.y:(top+bottom)/2;
  if(right<=left||bottom<=top||x<left||x>=right||y<top||y>=bottom) return {error:'target clipped outside viewport'};
  if(!Number.isFinite(x)||!Number.isFinite(y)||x<0||y<0||x>=innerWidth||y>=innerHeight) return {error:'target outside viewport'};
@@ -88,7 +88,7 @@ _GUARD = """({token,node,point,signature,clip}) => {
  const contains=(parent,child)=>{while(child){if(child===parent)return true;child=child.parentNode||child.host;}return false;};
  if(e && !contains(e,hit)) return {error:'covered target'};
  if(e && (e.disabled||e.closest('[inert]')||getComputedStyle(e).visibility==='hidden'||Number(getComputedStyle(e).opacity)===0)) return {error:'disabled or hidden target'};
- return {x,y,navigation:hit?.closest('a[href]')?.href||null};
+ return {x,y,bounds:r?{x:r.x,y:r.y,width:r.width,height:r.height}:null,navigation:hit?.closest('a[href]')?.href||null};
 }"""
 
 
@@ -113,6 +113,7 @@ class BrowserSession:
         self._local_frames: set[Any] = set()
         self._world_name = 'browser-automation-' + uuid.uuid4().hex
         self._monitor = TrafficMonitor()
+        self._page_listeners: dict[Any, list[tuple[str, Any]]] = {}
 
     @staticmethod
     def _allowed_url(url: str, *, subframe: bool = False) -> bool:
@@ -213,7 +214,7 @@ class BrowserSession:
         remote = await parent.session.send('DOM.resolveNode',{'backendNodeId':owner['backendNodeId'],'executionContextId':context})
         object_id = remote['object']['objectId']
         try:
-            result = await parent.session.send('Runtime.callFunctionOn',{'objectId':object_id,'functionDeclaration':f'function(arg){{return ({script})(this,arg);}}','arguments':[{'value':argument}],'returnByValue':True})
+            result = await parent.session.send('Runtime.callFunctionOn',{'objectId':object_id,'functionDeclaration':f'function(arg){{const url=location.href||"";let proto="";try{{proto=new URL(url).protocol;}}catch(e){{}}if(!(url==="about:blank"||url==="about:srcdoc"||proto==="http:"||proto==="https:"))return {{__protected_url:true}};return ({script})(this,arg);}}','arguments':[{'value':argument}],'returnByValue':True})
             return self._runtime_value(result)
         finally:
             try:
@@ -309,13 +310,21 @@ class BrowserSession:
                     tab = uuid.uuid4().hex
                     self._ids[page] = tab
                     self._pages[tab] = page
-                    page.on('popup', lambda popup, opener=page: self._owned.add(popup) if opener in self._owned else None)
-                    page.on('framenavigated', lambda frame: self._local_frames.discard(frame))
+                    listeners = [('popup', lambda popup, opener=page: self._owned.add(popup) if opener in self._owned else None),
+                                 ('framenavigated', lambda frame: self._local_frames.discard(frame))]
+                    self._page_listeners[page] = listeners
+                    for event, callback in listeners:
+                        page.on(event, callback)
         for tab, page in list(self._pages.items()):
             if page.is_closed():
                 self._pages.pop(tab)
                 self._ids.pop(page, None)
                 self._owned.discard(page)
+                for event, callback in self._page_listeners.pop(page, []):
+                    page.remove_listener(event, callback)
+                self._invalidate(tab)
+                self._page_cdp.pop(page, None)
+                self._local_frames.difference_update({frame for frame in self._local_frames if frame.page == page})
 
     def _page(self, tab_id: str, *, allow_protected: bool = False) -> Any:
         self._sync_pages()
@@ -339,7 +348,7 @@ class BrowserSession:
 
     @staticmethod
     def _navigation_options(wait_until: str, timeout_ms: int) -> None:
-        if wait_until not in {'commit', 'domcontentloaded', 'load'}:
+        if not isinstance(wait_until, str) or wait_until not in {'commit', 'domcontentloaded', 'load'}:
             raise BrowserError('wait_until must be commit, domcontentloaded, or load')
         if isinstance(timeout_ms, bool) or not isinstance(timeout_ms, int) or not 1 <= timeout_ms <= 120000:
             raise BrowserError('timeout_ms must be between 1 and 120000')
@@ -391,7 +400,7 @@ class BrowserSession:
         async with self._lock:
             return await self._monitor.start(self._page(tab_id), tab_id, kind, **options)
 
-    async def monitor_list(self, tab_id: str, kind: str, cursor: str | None = None, limit: int = 100) -> dict[str, Any]:
+    async def monitor_list(self, tab_id: str, kind: str, cursor: int | None = None, limit: int = 100) -> dict[str, Any]:
         async with self._lock:
             self._page(tab_id)
             return self._monitor.list(tab_id, kind, cursor=cursor, limit=limit)
@@ -410,8 +419,10 @@ class BrowserSession:
         while current.parent_frame is not None:
             geometry = await self._eval_owner(current,'''(e)=>{
               const r=e.getBoundingClientRect();
+              const root=document.documentElement,rs=getComputedStyle(root);
+              const clipsOverflow=p=>{const s=getComputedStyle(p);return p!==root&&s.display!=='contents'&&s.display!=='inline'&&!(p===document.body&&root.tagName==='HTML'&&rs.overflowX==='visible'&&rs.overflowY==='visible'&&rs.contain==='none'&&s.contain==='none');};
               let left=Math.max(0,r.left+e.clientLeft),top=Math.max(0,r.top+e.clientTop),right=Math.min(innerWidth,r.left+e.clientLeft+e.clientWidth),bottom=Math.min(innerHeight,r.top+e.clientTop+e.clientHeight),transformed=false,hidden=false;
-              for(let p=e;p;p=p.parentElement||p.getRootNode().host){const s=getComputedStyle(p),pr=p.getBoundingClientRect();transformed ||= s.transform!=='none'||s.zoom!=='1'&&s.zoom!=='normal';hidden ||= s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0;if(p!==e){if(/hidden|clip|auto|scroll/.test(s.overflowX)){left=Math.max(left,pr.left+p.clientLeft);right=Math.min(right,pr.left+p.clientLeft+p.clientWidth);}if(/hidden|clip|auto|scroll/.test(s.overflowY)){top=Math.max(top,pr.top+p.clientTop);bottom=Math.min(bottom,pr.top+p.clientTop+p.clientHeight);}}}
+              for(let p=e;p;p=p.parentElement||p.getRootNode().host){const s=getComputedStyle(p),pr=p.getBoundingClientRect();transformed ||= s.transform!=='none'||s.zoom!=='1'&&s.zoom!=='normal';hidden ||= s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0;if(p!==e&&clipsOverflow(p)){if(/hidden|clip|auto|scroll/.test(s.overflowX)){left=Math.max(left,pr.left+p.clientLeft);right=Math.min(right,pr.left+p.clientLeft+p.clientWidth);}if(/hidden|clip|auto|scroll/.test(s.overflowY)){top=Math.max(top,pr.top+p.clientTop);bottom=Math.min(bottom,pr.top+p.clientTop+p.clientHeight);}}}
               return {x:r.x+e.clientLeft,y:r.y+e.clientTop,left,top,right,bottom,transformed,hidden};
             }''')
             if geometry['transformed']:
@@ -450,20 +461,32 @@ class BrowserSession:
     async def _protected_frames(self, frames: list[_FrameRef]) -> tuple[list[dict[str, Any]], bool]:
         limitations = []
         withheld = False
+        visibility_cache: dict[str, str] = {}
         for frame in frames:
             if self._frame_allowed(frame):
                 continue
-            visibility = 'unknown'
-            try:
-                await self._frame_geometry(frame)
-                visibility = 'visible'
-            except ProtectedUrlError:
-                pass
-            except UnsafeActionError as exc:
-                if 'hidden' in str(exc) or 'clipped' in str(exc):
-                    visibility = 'hidden'
-            except PlaywrightError:
-                pass
+            # Determine visibility at the outermost protected owner. Its hidden
+            # descendants need no evaluation and must not suppress parent pixels.
+            boundary = frame
+            current = frame.parent_frame
+            while current is not None:
+                if not self._allowed_url(current.url, subframe=current.parent_frame is not None):
+                    boundary = current
+                current = current.parent_frame
+            visibility = visibility_cache.get(boundary.frame_id)
+            if visibility is None:
+                visibility = 'unknown'
+                try:
+                    await self._frame_geometry(boundary)
+                    visibility = 'visible'
+                except ProtectedUrlError:
+                    pass
+                except UnsafeActionError as exc:
+                    if 'hidden' in str(exc) or 'clipped' in str(exc):
+                        visibility = 'hidden'
+                except PlaywrightError:
+                    pass
+                visibility_cache[boundary.frame_id] = visibility
             withheld |= visibility != 'hidden'
             limitations.append({'frame_id': frame.frame_id, 'scheme': urlsplit(frame.url).scheme,
                                 'code': 'protected_subframe_skipped', 'visibility': visibility,
@@ -474,7 +497,7 @@ class BrowserSession:
         limitations, withheld = await self._protected_frames(await self._frames(page))
         if withheld:
             raise UnsafeActionError('Screenshot withheld: visible or unknown protected subframe')
-        masks = [frame.locator('input[type="password"],input[autocomplete*="password"],input[autocomplete^="cc-"],input[autocomplete="one-time-code"]') for frame in page.frames if self._allowed_url(frame.url, subframe=frame.parent_frame is not None)]
+        masks = [frame.locator('input[type="password"],input[autocomplete*="password"],input[autocomplete^="cc-"],input[autocomplete="one-time-code"]') for frame in page.frames if self._frame_allowed(frame)]
         self._ensure_safe(page)
         return await page.screenshot(type='png', full_page=False, mask=masks)
 
@@ -494,6 +517,7 @@ class BrowserSession:
             safety = {'editable_nonempty': False, 'sensitive_fields': False, 'unsaved': False}
             ready_state = 'unknown'
             collected_text_nodes = 0
+            visible_alerts = []
             source_truncated = False
             if len(frames) > 64:
                 limitations.append({'frame': 64, 'reason': f'Omitted {len(frames) - 64} frames beyond 64-frame limit'})
@@ -525,6 +549,13 @@ class BrowserSession:
                 collected_text_nodes += data.get('rendered_text_nodes', 0)
                 if frame.parent_frame is None:
                     ready_state = data.get('ready_state', 'unknown')
+                for alert in data.get('visible_alerts', []):
+                    if len(visible_alerts) >= 8:
+                        break
+                    bounds = dict(alert['bounds'])
+                    bounds['x'] += ox
+                    bounds['y'] += oy
+                    visible_alerts.append({**alert, 'bounds': bounds, 'frame_id': frame.frame_id})
                 omitted_elements += data.get('omitted_elements', 0)
                 documents.append((frame, data['document'], self._semantic_digest(data)))
                 sections.append(f"[frame {index}: {data['url']}]\n{data['text']}")
@@ -536,11 +567,12 @@ class BrowserSession:
                     bounds['y'] += oy
                     if bounds['x']+bounds['width']<=clip['left'] or bounds['x']>=clip['right'] or bounds['y']+bounds['height']<=clip['top'] or bounds['y']>=clip['bottom']:
                         continue
-                    target = _Target(frame, data['document'], local, element['operations'], bounds, screenshot and element['role'] == 'canvas', element.pop('signature'), tuple(o['value'] for o in element.get('options',[]) if not o['disabled']), element.get('multiple',False), tuple(url for url in (element.get('href'),element.get('form_action')) if url))
+                    target = _Target(frame, data['document'], local, element['operations'], bounds, screenshot and not screenshot_withheld and element['role'] == 'canvas', element.pop('signature'), tuple(o['value'] for o in element.get('options',[]) if not o['disabled']), element.get('multiple',False), tuple(url for url in (element.get('href'),element.get('form_action')) if url))
                     targets[public] = target
                     elements.append({**element, 'id': public, 'bounds': bounds, 'frame': {'index': index, 'url': data['url'], 'offset': {'x': ox, 'y': oy}, 'document': data['document']}})
             text = '\n\n'.join(sections)
             observation: dict[str, Any] = {'id': revision, 'tab_id': tab_id, 'url': page.url, 'title': await page.title(), 'text': text[:max_text], 'elements': elements, 'truncated': len(text) > max_text or source_truncated, 'source_truncated': source_truncated, 'text_length': len(text), 'next_offset': max_text if len(text) > max_text else None, 'omitted_elements': omitted_elements, 'timestamp': time.time(), 'limitations': limitations}
+            observation['visible_alerts'] = visible_alerts
             coverage_reasons = [item.get('code', 'frame_unavailable') for item in limitations if item.get('visibility') != 'hidden']
             if source_truncated:
                 coverage_reasons.append('collector_budget_exceeded')
@@ -570,6 +602,7 @@ class BrowserSession:
                             targets[key] = _Target(frames[0], main_doc, None, ['click','hover','drag','scroll'], bounds, True)
                             elements.append({'id': key, 'role': 'visual-region', 'name': f'Screenshot region row {row} column {col}', 'value': '', 'operations': ['click','hover','drag','scroll'], 'bounds': bounds, 'frame': {'index': 0, 'document': main_doc}})
             self._snapshots[revision] = {'tab': tab_id, 'targets': targets, 'documents': documents, 'frame_ids': all_frame_ids, 'text': text, 'url': page.url, 'visual': png is not None, 'pixels': png, 'source_truncated': source_truncated, 'page': page}
+            self._snapshots[revision]['viewport'] = observation.get('viewport')
             while len(self._snapshots) > self._snapshot_limit:
                 self._snapshots.pop(next(iter(self._snapshots)))
             if screenshot:
@@ -602,7 +635,7 @@ class BrowserSession:
         self._page(tab_id)
         return snapshot
 
-    async def _validate(self, snapshot: dict[str, Any], *, visual: bool = False) -> None:
+    async def _validate(self, snapshot: dict[str, Any], *, visual_targets: tuple[_Target, ...] = ()) -> None:
         page = snapshot['page']
         frames = await self._frames(page)
         if page.url != snapshot['url'] or {f.frame_id for f in frames} != snapshot['frame_ids']:
@@ -616,10 +649,45 @@ class BrowserSession:
                 valid = False
             if not valid:
                 raise StaleObservationError('Document, visible semantics, or form state changed; observe again')
-        if visual and snapshot['visual']:
+        if visual_targets:
+            if not snapshot['visual']:
+                raise UnsafeActionError('Visual action requires a disclosed screenshot baseline')
+            viewport = await self._eval(frames[0], '({width:innerWidth,height:innerHeight})')
+            if viewport != snapshot['viewport']:
+                raise StaleObservationError('Viewport geometry changed; observe again')
             pixels = await self._capture(page)
-            if pixels != snapshot['pixels']:
-                raise StaleObservationError('Screenshot changed; observe again before visual dispatch')
+            self._compare_target_pixels(snapshot['pixels'], pixels, snapshot['viewport'], visual_targets)
+
+    @staticmethod
+    def _compare_target_pixels(baseline: bytes, current: bytes, viewport: dict[str, Any], targets: tuple[_Target, ...]) -> None:
+        # Decode each coherent whole screenshot once; compare only the full observed
+        # target rectangles (including drag destination), never an unrelated pixel.
+        if max(len(baseline), len(current)) > 32 * 1024 * 1024:
+            raise UnsafeActionError('Screenshot exceeds bounded visual guard byte budget')
+        with Image.open(io.BytesIO(baseline)) as before, Image.open(io.BytesIO(current)) as after:
+            if before.size != after.size:
+                raise StaleObservationError('Screenshot dimensions changed; observe again')
+            width, height = before.size
+            if width * height > 8_388_608 or width <= 0 or height <= 0:
+                raise UnsafeActionError('Screenshot exceeds bounded visual guard pixel budget')
+            sx, sy = width / viewport['width'], height / viewport['height']
+            for target in targets:
+                b = target.bounds
+                box = (max(0, math.floor(b['x'] * sx)), max(0, math.floor(b['y'] * sy)),
+                       min(width, math.ceil((b['x'] + b['width']) * sx)),
+                       min(height, math.ceil((b['y'] + b['height']) * sy)))
+                if box[0] >= box[2] or box[1] >= box[3]:
+                    raise StaleObservationError('Observed target region moved outside screenshot')
+                with before.crop(box) as old_crop, after.crop(box) as new_crop:
+                    with old_crop.convert('RGB') as old_rgb, new_crop.convert('RGB') as new_rgb:
+                        with ImageChops.difference(old_rgb, new_rgb) as diff:
+                            changed = diff.getbbox()
+                if changed:
+                    region = {'x': (box[0] + changed[0]) / sx, 'y': (box[1] + changed[1]) / sy,
+                              'width': (changed[2] - changed[0]) / sx, 'height': (changed[3] - changed[1]) / sy}
+                    error = StaleObservationError('Target pixels changed in region ' + json.dumps(region, sort_keys=True) + '; observe again before visual dispatch')
+                    error.diagnostic = {'code': 'target_pixels_changed', 'changed_region': region, 'target_bounds': dict(b)}
+                    raise error
 
     async def _point(self, target: _Target, action: dict[str, Any]) -> tuple[float, float]:
         ox, oy, clip = await self._frame_geometry(target.frame)
@@ -644,6 +712,10 @@ class BrowserSession:
             if result['error'] in ('wrong document','detached target','target semantics changed'):
                 raise StaleObservationError(result['error'])
             raise UnsafeActionError(result['error'])
+        if target.visual and target.node and result.get('bounds'):
+            live_bounds = {**result['bounds'], 'x': result['bounds']['x'] + ox, 'y': result['bounds']['y'] + oy}
+            if live_bounds != target.bounds:
+                raise StaleObservationError('Visual target geometry changed; observe again')
         if result.get('navigation') and not self._allowed_url(result['navigation']):
             raise UnsafeActionError('Point hits a protected navigation link')
         # Also hit-test each ancestor iframe; a parent overlay must not pass.
@@ -667,6 +739,39 @@ class BrowserSession:
         async with self._lock:
             return await self._act(tab_id, action)
 
+    async def _guard_protected_input(self, page: Any, points: list[tuple[float, float]], *, keyboard: bool = False) -> None:
+        frames = await self._frames(page)
+        protected, _ = await self._protected_frames(frames)
+        if not protected:
+            return
+        if keyboard:
+            focused_frame = await self._eval(frames[0], "(() => {let e=document.activeElement;while(e?.shadowRoot?.activeElement)e=e.shadowRoot.activeElement;return !!e&&['IFRAME','FRAME'].includes(e.tagName);})()")
+            if focused_frame:
+                raise UnsafeActionError('Unbound keyboard input into a frame is unsupported while protected frames are present; use an observed allowed target')
+        hidden = {item['frame_id'] for item in protected if item['visibility'] == 'hidden'}
+        for frame in frames:
+            if self._frame_allowed(frame) or frame.frame_id in hidden:
+                continue
+            boundary = frame
+            current = frame.parent_frame
+            while current is not None:
+                if not self._allowed_url(current.url, subframe=current.parent_frame is not None):
+                    boundary = current
+                current = current.parent_frame
+            try:
+                _, _, clip = await self._frame_geometry(boundary)
+            except (PlaywrightError, UnsafeActionError):
+                if points:
+                    raise UnsafeActionError('Cannot prove input avoids an unavailable protected frame') from None
+                continue
+            if any(clip['left'] <= x < clip['right'] and clip['top'] <= y < clip['bottom'] for x, y in points):
+                raise UnsafeActionError('Input point overlaps a skipped protected frame')
+            if len(points) == 2:
+                left, right = sorted((points[0][0], points[1][0]))
+                top, bottom = sorted((points[0][1], points[1][1]))
+                if left < clip['right'] and right >= clip['left'] and top < clip['bottom'] and bottom >= clip['top']:
+                    raise UnsafeActionError('Drag path may overlap a skipped protected frame')
+
     async def _act(self, tab_id: str, action: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(action, dict):
             raise UnsafeActionError('Action must be an object')
@@ -676,7 +781,8 @@ class BrowserSession:
         snapshot = self._snapshot(tab_id, action.get('observation_id', ''))
         target = snapshot['targets'].get(action.get('target'))
         destination = snapshot['targets'].get(action.get('to_target'))
-        await self._validate(snapshot, visual=bool(target and target.visual or destination and destination.visual))
+        visual_targets = tuple(t for t in (target, destination) if t is not None and t.visual)
+        await self._validate(snapshot, visual_targets=visual_targets)
         page = snapshot['page']
         if action.get('target') is not None and target is None:
             raise UnsafeActionError('Unknown target')
@@ -715,6 +821,12 @@ class BrowserSession:
             raise UnsafeActionError('drag requires observed to_target')
         point = await self._point(target, action) if target else None
         end = await self._point(destination,{k[3:]:v for k,v in action.items() if k in ('to_x','to_y')}) if operation=='drag' else None
+        input_points = [p for p in (point, end) if p is not None]
+        if operation == 'scroll' and not input_points:
+            view = await self._eval((await self._frames(page))[0], '({x:innerWidth/2,y:innerHeight/2})')
+            input_points.append((view['x'], view['y']))
+        if input_points or operation == 'press' and target is None:
+            await self._guard_protected_input(page, input_points, keyboard=operation == 'press' and target is None)
         old_pages = set(page.context.pages)
         started = time.perf_counter()
         # Invalidate before dispatch, including failed/partial operations.
@@ -877,6 +989,10 @@ class BrowserSession:
                 return
             self._closed = True
             await self._monitor.close()
+            for page, listeners in self._page_listeners.items():
+                for event, callback in listeners:
+                    page.remove_listener(event, callback)
+            self._page_listeners.clear()
             sessions = set(self._page_cdp.values()) | set(self._oop_cdp.values())
             for session in sessions:
                 try:
