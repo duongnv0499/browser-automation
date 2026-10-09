@@ -163,11 +163,16 @@
   "agent_install_feature": {
     "date": "2026-10-09",
     "goal": "Natural-language agent installation via install.md; local stdio default, safe Codex MCP registration and portable skill discovery; HTTP opt-in, no installer daemon or mandatory model key.",
-    "phase": "Both workers READY; SetupProof /tmp script prepared, no smoke run; awaiting parent review/early exact-path push authorization and explicit unified smoke authorization",
+    "phase": "Complete docs/runbook and parent-authorized fresh-clone command proof; final evidence release commit/push authorized to SetupProof",
     "ownership": "SetupDocs implements install runbook/client docs; SetupProof owns research, evidence, states and exact-path GitOwner commits/push.",
     "verification_gate": "Both workers READY, parent review, early docs push, then explicit parent authorization of isolated HOME/CODEX_HOME fresh remote clone installation first/rerun/conflict preservation plus actual tools/doctor and skill discovery.",
     "safety": "Preserve doc.md, unrelated config/checkouts/skills/credentials; no native attachment/browser restart, paid model, secret output, force replacement or permanent daemon. Missing keys do not prevent diagnostics.",
-    "evidence_limits": "Existing installed uv/Codex and cached dependencies are not a clean-machine or autonomous paid Codex conversation proof."
+    "evidence_limits": "Existing installed uv/Codex and cached dependencies are not clean-machine provisioning or autonomous Codex conversation proof; no paid model, browser launch, current-session refresh, remote TLS or persistent service verified.",
+    "early_commit": "3f3cfc5d9a7eec1480c513decae53671c10c813c",
+    "early_push": "origin/main successful",
+    "verification": "Complete isolated HOME/CODEX_HOME remote clone installation proof passed10.98s: exact published SDK stdio2025-06-18 tools15/doctor, actual Codex user skill discovery, HTTP2026-07-28 tools15/doctor with token-env config; idempotent env/config/link and unrelated/foreign config/checkout/skill preservation. Exact existing .env/token published snippets additionally passed0.55s retained0600 bytes.",
+    "artifacts": ["/tmp/browser-agent-install-fmtf6879/report.json", "/tmp/browser-agent-install-fmtf6879/skills-list.json", "/tmp/browser-agent-install-fmtf6879/private-file-rerun.json"],
+    "final_commit_reference": "Exact final evidence commit and successful origin/main push are reported in SetupProof handoff; self-hash cannot be embedded in own content."
   },
   "resume": "Re-read AGENTS.md, this file, own state, and current owned source; retain scope/research/security/verification/commit rules."
 }

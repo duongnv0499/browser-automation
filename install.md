@@ -65,6 +65,8 @@ On Windows, also apply a user-only ACL appropriate to the host; POSIX mode bits 
 
 Prefer MCP name `browser-automation`. Inspect first:
 
+Treat `mcp get --json` output as private: an existing configuration may contain inline environment/header secrets. Inspect locally through a non-echoing capture, redact values before recording artifacts or reports, and do not stream raw configuration into chat or routine tool logs. Compare secret-bearing settings privately; only report their names/presence, never values.
+
 ```sh
 MCP_NAME=browser-automation
 codex mcp get "$MCP_NAME" --json
@@ -172,3 +174,11 @@ Report the actual install directory, uv path, MCP name/transport (HTTP URL if ap
 ## Sources and evidence boundary
 
 Primary contracts accessed **2026-10-09**: [Codex MCP](https://developers.openai.com/codex/mcp) (redirects to [current MCP docs](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)), [Codex skills](https://developers.openai.com/codex/skills) (redirects to [Build skills](https://learn.chatgpt.com/docs/build-skills)), [uv installation](https://docs.astral.sh/uv/getting-started/installation/), [SDK transports](https://py.sdk.modelcontextprotocol.io/client/transports/index.md), and [SDK negotiation](https://py.sdk.modelcontextprotocol.io/protocol-versions/index.md). Codex supports local subprocess/HTTP bearer configuration, `env_vars`, and symlinked user/project skills. SDK `Client(..., mode="legacy")` explicitly negotiates initialization for this stdio server; HTTP can use modern discovery. Installed Codex CLI help must still be inspected for version-specific flags. Documented support is not proof an autonomous Codex conversation, personal browser, or paid provider call was exercised; actual repository evidence lives in [research](docs/research.md).
+
+### Exercised installation recipe
+
+On **2026-10-09**, the authorized installation proof cloned published commit `3f3cfc5d9a7eec1480c513decae53671c10c813c` into a temporary home with isolated `HOME`/`CODEX_HOME` and executed the documented setup using actual uv and Codex CLI. The exact stdio SDK snippet above negotiated `2025-06-18`, discovered all 15 tools, and successfully called `doctor` with no provider keys or native consent. Actual Codex app-server `skills/list` discovered the linked repository skill in user scope. Repeated setup retained identical `.env`/Codex configuration bytes and the correct skill link; unrelated MCP configuration and a private environment fixture were preserved. Conflict fixtures retained a foreign MCP entry while selecting `browser-automation-local`, rejected a broken foreign skill link without replacement, and rejected a foreign checkout origin without touching its user marker.
+
+The HTTP branch also registered a bearer-token environment reference through actual Codex CLI, started a temporary loopback foreground server, and used the official SDK to discover 15 tools and call `doctor` over negotiated `2026-07-28`. Its private token file was mode `0600`; the token was not logged, and the server was stopped after the probe. Machine-local evidence: `/tmp/browser-agent-install-fmtf6879/report.json` (not a durable public artifact).
+
+This verifies an agent-executable recipe with real installation/configuration/protocol/discovery tools, **not an autonomous paid Codex installation conversation**. Existing uv/Codex installations and shared uv/Python caches were used; clean-machine dependency provisioning was not tested. No browser launch, personal native attachment/consent dialog, paid provider call, public TLS deployment, or reboot-persistent service was exercised. No runtime code changed and no full browser suite was rerun for this documentation-only installation proof.

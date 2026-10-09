@@ -1,16 +1,25 @@
 {
   "worker": "SetupProof",
   "date": "2026-10-09",
-  "phase": "READY: docs handoff received and proof script prepared, not executed; awaiting parent scope review/early push and explicit smoke authorization",
+  "phase": "Complete authorized isolated installation proof; parent reviewed evidence and authorized final release commit/push",
   "owned_paths": ["agents/setup-proof.json", "agents/workstreams.json", "docs/research.md", "CHANGELOG.md"],
   "git_owner": true,
   "commit_contract": "Exact SetupDocs handed-off paths and own paths only, serialized commits/push shared main; no git add ., force, reset, or doc.md changes.",
   "proof_script": "/tmp/browser-agent-install-proof.py",
   "proof_command_after_authorization": "/home/claw/.local/bin/uv run --no-project --with mcp==2.3.0 python /tmp/browser-agent-install-proof.py",
   "setup_docs_handoff": {"paths": ["install.md", "README.md", "docs/integrations.md", "docs/http.md", "agents/setup-docs.json"], "commit_message": "docs: add safe Codex self-install runbook and agent install prompt"},
+  "early_commit": "3f3cfc5",
+  "early_push": "origin/main successful (12b0b8c..3f3cfc5)",
+  "parent_authorization": "Main approved complete docs/runbook, authorized exact SDK stdio/HTTP and isolated first/rerun/conflicts; no browser/model/build/full-suite",
+  "final_push_authorization": "Main reviewed actual report and confirmed standing final facts/docs/state push authorization; no further checks required",
+  "final_doc_handoff": ["install.md", "agents/setup-docs.json"],
   "installed_interfaces": {"codex": "0.156.1", "uv": "0.11.16", "uv_absolute": "/home/claw/.local/bin/uv", "mcp_get": "codex mcp get NAME --json", "http_add": "codex mcp add NAME --url URL --bearer-token-env-var ENV", "schema_dir": "/tmp/browser-setup-codex-schema", "skills_list": "skills/list params cwds array, forceReload true; initialize clientInfo name/version required"},
   "plan": ["Prepare throwaway /tmp proof only", "Both workers READY and parent review before exact-path docs commit/push", "Parent explicit authorization before any installation smoke", "Fresh remote clone under isolated HOME/CODEX_HOME; actual documented sync/register/link/doctor then exact rerun", "Preserve unrelated MCP config and .env values; reject foreign checkout/skill and select unused MCP name", "Actual stdio SDK initialize/tools/list/doctor and Codex app-server skills/list", "Optional HTTP runtime/SDK token-env registration only with documented recipe"],
   "limits": ["No paid model turn or autonomous Codex install conversation", "No native browser consent or existing profile access", "Existing uv/Codex and shared cache are not clean-machine prerequisite proof"],
   "sources": ["https://docs.astral.sh/uv/getting-started/installation/", "https://docs.astral.sh/uv/concepts/projects/sync/"],
-  "resume": "Read AGENTS.md/workstreams/own state, wait for docs handoff + parent authorization; never smoke mid-flight."
+  "verification": {"status": "passed", "command": "/home/claw/.local/bin/uv run --no-project --with mcp==2.3.0 python /tmp/browser-agent-install-proof.py", "wall_seconds": 10.98, "source_commit": "3f3cfc5d9a7eec1480c513decae53671c10c813c", "report": "/tmp/browser-agent-install-fmtf6879/report.json", "skills": "/tmp/browser-agent-install-fmtf6879/skills-list.json", "stdio": "Exact published SDK Client(mode=legacy), protocol2025-06-18 tools15 doctor success", "http": "Actual localhost foreground token-env registration, protocol2026-07-28 tools15 doctor success; server stopped", "skill": "Actual Codex skills/list user scope enabled and resolved fresh checkout source", "preservation": "Rerun config/.env exact bytes, correct symlink; unrelated MCP/private fixture, foreign MCP alternate-name, broken skill and foreign origin preserved", "private_file_rerun": {"command": "uv run --no-project python /tmp/browser-agent-private-file-proof.py", "wall_seconds": 0.55, "result": "Exact published existing .env and token branches retained bytes and0600", "report": "/tmp/browser-agent-install-fmtf6879/private-file-rerun.json"}},
+  "initial_attempt": {"report": "/tmp/browser-agent-install-29hul0ed/report.json", "result": "Throwaway harness bug required existing equivalent alternate MCP name absent during later skill-conflict fixture; /tmp-only repaired then entire fresh-clone proof passed"},
+  "unexercised": ["autonomous Codex install conversation", "paid provider turn", "current installing conversation tool refresh", "native or isolated browser launch", "remote TLS/public deployment", "persistent service", "clean-machine uv/Codex/Python provisioning"],
+  "final_commit_reference": "Exact evidence commit and successful push reported by handoff; own hash cannot be embedded in its contents",
+  "resume": "Read AGENTS.md/workstreams/own state, retain explicit verification authorization and exact-path GitOwner; never claim autonomous paid install."
 }

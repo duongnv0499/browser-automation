@@ -1,7 +1,7 @@
 {
   "worker": "SetupDocs",
   "date": "2026-10-09",
-  "phase": "READY for parent review and coordinated SetupProof verification",
+  "phase": "Complete: parent review approved, published recipe proof passed; final evidence commit/push by SetupProof",
   "owned_paths": ["install.md", "README.md", "docs/integrations.md", "docs/http.md", "agents/setup-docs.json"],
   "unchanged": ["doc.md", "skills/browser-automation/SKILL.md", "runtime", "lockfile"],
   "contract": {
@@ -18,8 +18,21 @@
     {"url": "https://py.sdk.modelcontextprotocol.io/protocol-versions/index.md", "date": "2026-10-09", "contract": "mode legacy explicitly initializes; mode auto discovers/falls back"}
   ],
   "checks_run": [],
+  "authorized_proof": {
+    "owner": "SetupProof",
+    "status": "passed",
+    "source_commit": "3f3cfc5d9a7eec1480c513decae53671c10c813c",
+    "artifact": "/tmp/browser-agent-install-fmtf6879/report.json",
+    "stdio": "Exact published SDK Client(mode=legacy): initialize protocol2025-06-18, tools15, doctor success, no keys/sessions/native consent",
+    "skill": "Actual Codex app-server skills/list discovered correct fresh-checkout SKILL.md in user scope",
+    "idempotence": "Exact .env/config bytes and correct link retained; private env and unrelated MCP fixture preserved",
+    "conflicts": "Foreign MCP retained with alternate browser-automation-local; broken foreign skill link and foreign checkout origin rejected unchanged",
+    "http": "Actual Codex URL/bearer-token-env registration, ephemeral foreground loopback server, SDK protocol2026-07-28 tools15/doctor; token mode0600 not logged; server stopped",
+    "limits": ["Existing uv/Codex and shared uv/Python caches; not clean-machine provisioning", "No autonomous paid Codex installation conversation", "No browser launch/native personal profile/consent dialog", "No provider call/public TLS/reboot persistence"],
+    "probe_repair": "Initial throwaway probe wrongly rejected equivalent alternate MCP name during skill conflict fixture; /tmp-only fix followed by complete passing proof; no documentation defect"
+  },
   "verification_owner": "SetupProof after Main authorizes; no mid-flight tests/build/lint/smoke run by SetupDocs",
   "git_owner": "SetupProof exclusively stages/commits/pushes exact handed-off paths after parent review",
   "proposed_commit": "docs: add safe Codex self-install runbook and agent install prompt",
-  "remaining": "Parent review, fresh-clone proof, owned-doc repairs if actual proof finds discrepancies; no autonomous paid model/native/browser claim"
+  "remaining": "SetupProof final exact-path evidence commit/push only; no known documentation defects or runtime changes"
 }

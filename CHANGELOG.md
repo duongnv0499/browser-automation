@@ -3,6 +3,7 @@
 ## 0.1.0 — Unreleased
 
 - Add an agent-followable `install.md` entrypoint and prominent natural-language installation prompt: configure the local stdio MCP and portable skill safely, preserve existing credentials/configuration, distinguish diagnostics from live-model/browser readiness, and make HTTP an explicit deployment choice rather than an installer daemon.
+- Verify the agent-install runbook from a fresh pushed checkout with isolated Codex home: exact published SDK stdio diagnostic, authenticated localhost HTTP doctor, actual Codex skill discovery, rerun idempotence and preservation conflicts; distinguish this cached-dependency command proof from autonomous model installation, browser readiness and paid-provider execution.
 
 - Add an instruction-only portable browser-automation skill for bounded decision-first Luna workflows, explicit browser choice, persistent IDs, context/privacy budgets, exact host approvals and independent rendered evidence; document current Codex/Claude/Hermes discovery without a mandatory-skill claim.
 - Document optional authenticated Streamable HTTP deployment on the browser host, current/legacy protocol boundaries, compatible Codex/Claude and SDK configuration, per-identity ownership, bounds and a TLS reverse-proxy recipe; preserve default stdio and the OMP stdio bridge.
