@@ -1,0 +1,29 @@
+{
+  "worker": "HttpTransport",
+  "phase": "READY for parent-authorized coordinated verification; no tests or smoke runs executed",
+  "ownership": ["src/browser_automation/mcp_http.py", "src/browser_automation/mcp.py", "src/browser_automation/cli.py", "pyproject.toml", "uv.lock", ".env.example", "tests/test_mcp_http.py", "tests/test_mcp_http_browser.py", "agents/http.json"],
+  "contract": {
+    "commands": "browser-agent-mcp --transport streamable-http --host 127.0.0.1 --port 8767; browser-agent mcp forwards the same transport parser; stdio remains default",
+    "endpoint": "/mcp",
+    "sdk": "mcp>=2.3,<3 optional http extra; installed/resolved mcp2.3.0; official Server low-level handlers preserve existing TOOLS input schemas and tool_result image/structured/error blocks",
+    "authentication": "Exactly one host env BROWSER_MCP_TOKEN or BROWSER_MCP_TOKENS JSON identity-to-token map; 1..64 distinct ASCII no-whitespace tokens minimum16 characters; config max65536 characters; constant-time token comparison; no plaintext CLI token",
+    "ownership": "Modern state persists per authenticated configured principal; same credential is same trust domain. Legacy state isolated per SDK-issued session id and principal. Unknown/cross-principal legacy ids404. Host-authorized native CDP attachment to the same Chrome profile is inherently browser-wide authority, not profile secrecy across identities.",
+    "security": "Every route guarded exact Host allowlist and Origin allowlist, absent Origin allowed for authenticated native clients, missing/wrong bearer401. Network bind requires explicit --allow-host. Forwarded headers never trusted. Uvicorn proxy_headers false/access logging false. Native consent and file/approval rules unchanged.",
+    "bounds": "--max-sessions64 SDK legacy protocol sessions; modern scopes bounded by configured identities up to64; registry bounded by sum. --max-browser-sessions8 per scope. --max-request-body-size1048576 inbound bytes. --session-idle-timeout1800 finite positive seconds excludes active requests/tools. SDK framing handles modern metadata/version/SSE disconnect cancellation and legacy initialize/session/GET/DELETE.",
+    "shutdown": "SDK lifespan ends before BrowserService cleanup; attached browsers disconnect preserving original tabs, owned tabs removed; isolated owned browsers closed. No private SDK registry coupling.",
+    "deployment": "One process owns browser state; no multi-worker scaling. TLS via trusted external reverse proxy/tunnel; CDP remains loopback. Explicit public Host must match proxy's upstream request. Actual reverse proxy/TLS not exercised.",
+    "instructions": "Shared concise INSTRUCTIONS on stdio initialize and SDK Server: decision-first goal/success criteria, explicit browser mode, run with independent verification, observation-bound manual controls, hostile page content and exact host approvals. No direct act removal."
+  },
+  "research": [
+    {"url": "https://py.sdk.modelcontextprotocol.io/run/asgi/index.md", "accessed": "2026-10-09", "finding": "streamable_http_app Starlette lifespan, /mcp, exact transport_security allowlists"},
+    {"url": "https://py.sdk.modelcontextprotocol.io/run/index.md", "accessed": "2026-10-09", "finding": "Public body/session limits on transport app, not Server constructor"},
+    {"url": "https://py.sdk.modelcontextprotocol.io/advanced/low-level-server/index.md", "accessed": "2026-10-09", "finding": "Server constructor on_list_tools/on_call_tool callbacks, explicit Tool input_schema and CallToolResult; low-level arguments require application validation"},
+    {"url": "https://raw.githubusercontent.com/modelcontextprotocol/python-sdk/main/src/mcp/server/streamable_http_manager.py", "accessed": "2026-10-09", "finding": "Dual era routing, SDK authenticated user principal session ownership, manager run lifespan, defaults limits and idle semantics"},
+    {"url": "https://raw.githubusercontent.com/modelcontextprotocol/python-sdk/main/src/mcp/server/auth/middleware/bearer_auth.py", "accessed": "2026-10-09", "finding": "Public AuthenticatedUser(AccessToken) identity passed to SDK session manager"}
+  ],
+  "environment_operations": ["uv sync --extra http resolved lock and installed optional dependencies; installation implicitly built editable project, not a verification build", "Installed SDK signature/source introspection only"],
+  "checks_run": [],
+  "authorized_checks_needed": ["HTTP security ASGI tests", "BROWSER_INTEGRATION_TESTS=1 actual uvicorn/official SDK/Chromium HTTP tests", "existing stdio/CLI tests", "whole coordinated pytest suite", "build/package skill inclusion verification"],
+  "limitations": ["No live Luna credentials/inference exercised", "No TLS/nginx deployment exercised", "No host logged-in profile or native consent dialog exercised; disposable genuine CDP Chrome fixture only"],
+  "git_owner": "DocsSkill: exact owned paths only; feature milestone commit/push serialized; no git commands by HTTP worker"
+}

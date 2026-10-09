@@ -13,6 +13,9 @@ dependencies = [
   "playwright>=1.49,<2",
 ]
 
+[project.optional-dependencies]
+http = ["mcp>=2.3,<3", "uvicorn>=0.35,<1", "jsonschema>=4.23,<5"]
+
 [project.scripts]
 browser-agent = "browser_automation.cli:main"
 browser-agent-mcp = "browser_automation.mcp:main"
@@ -24,7 +27,7 @@ dev = ["pytest>=8,<10", "pytest-asyncio>=0.24,<2"]
 packages = ["src/browser_automation"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/", "tests/", "docs/", "README.md", "CHANGELOG.md", "pyproject.toml", "uv.lock"]
+include = ["src/", "tests/", "docs/", "skills/", "README.md", "CHANGELOG.md", "pyproject.toml", "uv.lock"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

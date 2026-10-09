@@ -99,7 +99,8 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("serve", help="Persistent JSON-lines worker")
     commands.add_parser("doctor", help="Report dependencies and key presence, never key values")
-    commands.add_parser("mcp", help="MCP stdio server")
+    from .mcp import add_transport_arguments
+    add_transport_arguments(commands.add_parser("mcp", help="MCP server; stdio or authenticated Streamable HTTP"))
     approve = commands.add_parser("approve", help="HOST ONLY interactive exact-action approval; not an MCP tool")
     approve.add_argument("--binding-file", required=True)
     approve.add_argument("--approval-file", required=True)
@@ -132,7 +133,7 @@ def main():
         os.environ["BROWSER_EXECUTABLE_PATH"] = args.executable_path
     if args.command == "mcp":
         from .mcp import main as mcp_main
-        mcp_main()
+        mcp_main(args=args)
         return
     try:
         asyncio.run(json_lines() if args.command == "serve" else once(args))
