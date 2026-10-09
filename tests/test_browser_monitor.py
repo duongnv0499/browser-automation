@@ -110,6 +110,11 @@ async def test_real_http_status_failure_redirect_scope_and_cursor(tmp_path):
         monitor = TrafficMonitor()
         try:
             await monitor.start(page, tab, "network", max_events=64)
+            duplicate = await monitor.start(page, tab, "network", max_events=64)
+            assert duplicate["already_active"]
+            with pytest.raises(ValueError, match="stop.*start"):
+                await monitor.start(page, tab, "network", max_events=32)
+            assert monitor.list(tab, "network")["max_events"] == 64
             await browser._page(other).click("#http")
             await asyncio.sleep(0.1)
             assert monitor.list(tab, "network")["events"] == []
@@ -211,3 +216,47 @@ def test_url_secret_stripping_and_monitor_validation():
     monitor = TrafficMonitor()
     with pytest.raises(ValueError, match="start"):
         monitor.list("other-tab", "network")
+
+
+@pytest.mark.asyncio
+async def test_startup_failure_detaches_and_listener_errors_are_diagnostics():
+    # Fault-only unit fixture: this never manufactures a browser capture success.
+    class Emitter:
+        def __init__(self):
+            self.callbacks = []
+        def on(self, event, callback):
+            self.callbacks.append((event, callback))
+        def remove_listener(self, event, callback):
+            self.callbacks.remove((event, callback))
+
+    class FailedCDP(Emitter):
+        detached = False
+        async def send(self, *_):
+            raise RuntimeError("injected startup failure")
+        async def detach(self):
+            self.detached = True
+
+    class Page(Emitter):
+        def __init__(self):
+            super().__init__()
+            self.context = self
+            self.cdp = FailedCDP()
+        def is_closed(self):
+            return False
+        async def new_cdp_session(self, _):
+            return self.cdp
+
+    page = Page()
+    monitor = TrafficMonitor()
+    with pytest.raises(RuntimeError, match="startup failure"):
+        await monitor.start(page, "tab", "websocket")
+    assert not monitor._captures and not page.callbacks and not page.cdp.callbacks
+    assert page.cdp.detached
+    await monitor.start(page, "tab", "network")
+    def failed_detach(*_):
+        raise RuntimeError("sensitive exception string must not escape")
+    page.remove_listener = failed_detach
+    result = await monitor.stop("tab", "network")
+    assert result["cleanup_diagnostics"]
+    assert set(result["cleanup_diagnostics"]) == {"listener_detach_failed"}
+    await monitor.close()

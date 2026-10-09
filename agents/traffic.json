@@ -3,6 +3,7 @@
   "issues": ["05", "06"],
   "owned_paths": ["src/browser_automation/browser_monitor.py", "tests/test_browser_monitor.py", "agents/traffic.json"],
   "phase": "READY for coordinated verification; no checks run mid-flight",
+  "review_repairs": "Same-configuration duplicate start returns already_active; changed configuration rejects with stop/start instruction. Listener cleanup errors return bounded safe codes; background task exceptions are retrieved and recorded. Startup failure and cleanup fault-only unit fixtures added. Websocket metadata explicitly limits scope to main-page CDP target, excluding workers/OOP child frame targets.",
   "contract": {
     "start": "async start(page, tab_id, kind='network', max_events=256, url_filter=None, payloads=False, max_payload_bytes=512) -> dict",
     "list": "list(tab_id, kind, cursor=None, limit=100) -> dict",
@@ -18,6 +19,6 @@
   ],
   "security": "No HTTP bodies, postdata, cookies, auth or headers exposed. URL userinfo/query/fragment removed, protected schemes suppressed. Request tracking uses bounded weak references. Socket metadata/rings bounded. Text payloads contain explicit redaction limitation warning. No interception.",
   "verification": {"executed": [], "planned_authorized_command": "BROWSER_AGENT_LIBRARY_PATH=/home/claw/.local/lib/chromium/usr/lib/x86_64-linux-gnu uv run pytest tests/test_browser_monitor.py -q", "fixtures": "Real local asyncio HTTP503/redirect/failure and RFC6455 echo/ping/binary/error/close server; browser UI never displays results; screenshot proof via pytest tmp_path. Tests require Chromium and explicit parent gate."},
-  "limitations": ["Monitoring is prospective; preexisting requests and sockets may be incomplete", "CDP WebSocket messages do not expose fragmented-wire-frame boundaries", "Text redaction cannot guarantee removal of arbitrary secrets", "Actual Chromium ping/pong visibility remains to be exercised at parent verification gate"],
+  "limitations": ["Monitoring is prospective; preexisting requests and sockets may be incomplete", "Websocket scope is main-page CDP target; worker and out-of-process child-frame sockets are explicitly excluded in returned metadata", "CDP WebSocket messages do not expose fragmented-wire-frame boundaries", "Text redaction cannot guarantee removal of arbitrary secrets", "Actual Chromium ping/pong visibility remains to be exercised at parent verification gate"],
   "preserved": ["doc.md", "issues reports"]
 }

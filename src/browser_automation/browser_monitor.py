@@ -86,6 +86,7 @@ class _Capture:
     identity_evictions: int = 0
     active: bool = True
     incomplete_history: bool = True
+    cleanup_diagnostics: list[str] = field(default_factory=list)
 
     def accepts(self, url: str | None) -> bool:
         return self.url_filter is None or (url is not None and self.url_filter in url)
@@ -114,6 +115,9 @@ class _Capture:
                 "max_events": self.max_events, "url_filter": self.url_filter, "payloads": self.payloads,
                 "max_payload_bytes": self.max_payload_bytes, "dropped": self.dropped,
                 "identity_evictions": self.identity_evictions,
+                "cleanup_diagnostics": list(self.cleanup_diagnostics),
+                "scope": "page_events" if self.kind == "network" else "main_page_cdp_target",
+                "scope_limitations": ["WebSockets in workers or out-of-process child frame targets are not captured by the main-page CDP session."] if self.kind == "websocket" else [],
                 "payload_warning": "Text payload redaction is best effort; sensitive data may remain." if self.payloads else None}
 
 
@@ -125,6 +129,7 @@ class TrafficMonitor:
         self._cleanup_tasks: set[asyncio.Task] = set()
         self._lock = asyncio.Lock()
         self._closed = False
+        self.cleanup_diagnostics: deque[str] = deque(maxlen=32)
 
     async def start(self, page: Any, tab_id: str, kind: str = "network", max_events: int = 256,
                     url_filter: str | None = None, payloads: bool = False, max_payload_bytes: int = 512) -> dict:
@@ -143,7 +148,10 @@ class TrafficMonitor:
                 raise RuntimeError("TrafficMonitor is closed")
             key = (tab_id, kind)
             if key in self._captures:
-                return self._captures[key].metadata()
+                existing = self._captures[key]
+                if (existing.max_events, existing.url_filter, existing.payloads, existing.max_payload_bytes) != (max_events, url_filter, payloads, max_payload_bytes):
+                    raise ValueError("Monitor already active with different configuration; stop this tab/kind monitor, then start with the requested options")
+                return {**existing.metadata(), "already_active": True}
             if page.is_closed():
                 raise ValueError("Cannot monitor a closed page")
             capture = _Capture(page, tab_id, kind, max_events, url_filter, payloads, max_payload_bytes)
@@ -170,7 +178,11 @@ class TrafficMonitor:
     def _schedule_stop(self, tab_id: str, kind: str) -> None:
         task = asyncio.create_task(self.stop(tab_id, kind))
         self._cleanup_tasks.add(task)
-        task.add_done_callback(self._cleanup_tasks.discard)
+        def finished(done: asyncio.Task) -> None:
+            self._cleanup_tasks.discard(done)
+            if not done.cancelled() and done.exception() is not None:
+                self.cleanup_diagnostics.append("background_monitor_cleanup_failed")
+        task.add_done_callback(finished)
 
     def _network(self, c: _Capture) -> None:
         def identity(request: Any) -> dict:
@@ -270,14 +282,18 @@ class TrafficMonitor:
     async def _detach(self, c: _Capture) -> None:
         c.active = False
         for emitter, name, callback in c.listeners:
-            emitter.remove_listener(name, callback)
+            try:
+                emitter.remove_listener(name, callback)
+            except Exception:
+                if len(c.cleanup_diagnostics) < 32:
+                    c.cleanup_diagnostics.append("listener_detach_failed")
         c.listeners.clear()
         if c.cdp is not None:
             try:
                 await c.cdp.detach()
             except Exception:
-                # Already-closed targets have no remaining session to detach.
-                pass
+                if not c.page.is_closed() and len(c.cleanup_diagnostics) < 32:
+                    c.cleanup_diagnostics.append("cdp_detach_failed")
         c.requests.clear()
         c.sockets.clear()
         c.events.clear()
@@ -291,7 +307,7 @@ class TrafficMonitor:
                 return {"tab_id": tab_id, "kind": kind, "active": False, "stopped": False}
             metadata = c.metadata()
             await self._detach(c)
-            return {**metadata, "active": False, "stopped": True}
+            return {**metadata, "active": False, "stopped": True, "cleanup_diagnostics": list(c.cleanup_diagnostics)}
 
     async def close(self) -> None:
         async with self._lock:
