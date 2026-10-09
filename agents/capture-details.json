@@ -1,7 +1,7 @@
 {
   "owner": "CaptureDetails",
-  "status": "READY_FOR_COORDINATED_VERIFICATION",
-  "owned_paths": ["src/browser_automation/browser_monitor.py", "src/browser_automation/browser_network_data.py", "tests/test_network_details.py", "agents/capture-details.json"],
+  "status": "SCOPED_VERIFICATION_PASS",
+  "owned_paths": ["src/browser_automation/browser_monitor.py", "src/browser_automation/browser_network_data.py", "tests/test_browser_monitor.py", "tests/test_network_details.py", "agents/capture-details.json"],
   "contract": {
     "request_detail": "async(tab_id, request_id, fields=None, include_sensitive=False); selected fields plus capture_id/state/provenance/privacy/unavailable_fields",
     "request_body": "async(tab_id, request_id, part=response, offset=0, limit=65536, include_sensitive=False); byte offset chunks with utf-8 or base64, raw total and redacted export total, explicit availability",
@@ -15,8 +15,9 @@
     {"url": "https://playwright.dev/python/docs/api/class-request", "accessed": "2026-10-09", "finding": "headers_array includes security headers and preserves duplicate entries; post_data_buffer exact bytes; requestfailed distinct from HTTP non-2xx; frame may throw"},
     {"url": "https://playwright.dev/python/docs/api/class-response", "accessed": "2026-10-09", "finding": "body returns bytes; headers_array duplicates; finished waits; HTTP-version method version-dependent"}
   ],
-  "verification": "Not run: worker gate. Installed async Request/Response signatures inspected, not a behavior check.",
-  "review_repairs": ["Underlying body-task cancellation due capture stop or record eviction raises explicit capture_stopped/request_evicted ValueError, preserving actual caller cancellation", "Recheck record/cache retention after awaited header retrieval before exporting body", "Added real Chromium streaming consumers for concurrent stop, record eviction and caller cancellation; not executed pending parent gate"],
+  "verification": "Parent authorized scoped checks. Final: BROWSER_AGENT_LIBRARY_PATH=/home/claw/.local/lib/chromium/usr/lib/x86_64-linux-gnu uv run pytest -x -q --tb=short tests/test_browser_monitor.py tests/test_network_details.py: 11 passed in 18.49s. Chromium local HTTP, no mocked routing. Earlier run F plus 300s timeout. Diagnostic observed premature redirect cursor assertion and unavailable binary data under global 150ms body timeout; inferred low deadline/load contribution rather than asserting unlogged unavailable code. Repaired event completion predicate, dedicated short streaming timeout scope, explicit stream shutdown and metadata-only body availability failure diagnostics.",
+  "review_repairs": ["Internal body cancellation reports capture_stopped/request_evicted while actual caller cancellation propagates", "Post-header-await body export rechecks record/cache retention", "Real streaming stop/evict/cancel tests pass", "Shared is_sensitive_header helper aligns forwarding/export classification including prefixed Authorization/Cookie/CSRF", "Real binary chunk reassembly exactly matches 262144 fixture bytes; two-tab screenshot and sanitized event/detail proofs stored outside repository"],
+  "proof_artifacts": ["/tmp/pytest-of-claw/pytest-1760/test_real_details_two_tabs_raw0/network-detail-consumer.json", "/tmp/pytest-of-claw/pytest-1760/test_real_details_two_tabs_raw0/network-details-tab-0.png", "/tmp/pytest-of-claw/pytest-1760/test_real_details_two_tabs_raw0/network-details-tab-1.png"],
   "requested_parent_checks": ["tests/test_browser_monitor.py", "tests/test_network_details.py", "coordinated two-tab real browser workflow with source replay consumers"],
   "preserved": ["doc.md", "issues/", "installed configuration and secrets", "existing metadata list redaction and WebSocket behavior"]
 }

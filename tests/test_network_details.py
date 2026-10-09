@@ -1,6 +1,7 @@
 """Real browser passive network data consumers; no route interception."""
 import asyncio
 import base64
+import hashlib
 import json
 from contextlib import asynccontextmanager
 
@@ -16,6 +17,7 @@ BINARY = bytes(range(256)) * 1024
 @asynccontextmanager
 async def detail_site():
     tasks, writers = set(), set()
+    release_streams = asyncio.Event()
 
     async def serve(reader, writer):
         tasks.add(asyncio.current_task())
@@ -39,7 +41,7 @@ async def detail_site():
             elif path == "/stream":
                 writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\ndata: waiting\n\n")
                 await writer.drain()
-                await asyncio.sleep(60)
+                await asyncio.wait_for(release_streams.wait(), 30)
                 return
             else:
                 if path == "/503":
@@ -58,8 +60,9 @@ async def detail_site():
 
     server = await asyncio.start_server(serve, "127.0.0.1", 0)
     try:
-        yield f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+        yield f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}", release_streams
     finally:
+        release_streams.set()
         server.close()
         await server.wait_closed()
         for writer in tuple(writers):
@@ -79,10 +82,11 @@ async def completed(monitor, tab):
 
 
 @pytest.mark.asyncio
-async def test_real_details_two_tabs_raw_replay_and_generation(monkeypatch):
-    monkeypatch.setenv("BROWSER_NETWORK_BODY_TIMEOUT_MS", "150")
+async def test_real_details_two_tabs_raw_replay_and_generation(monkeypatch, tmp_path):
+    monkeypatch.setenv("BROWSER_NETWORK_BODY_TIMEOUT_MS", "10000")
     monkeypatch.delenv("BROWSER_NETWORK_SENSITIVE", raising=False)
-    async with detail_site() as url, await BrowserSession.launch(headless=True) as browser:
+    async with detail_site() as site, await BrowserSession.launch(headless=True) as browser:
+        url, release_streams = site
         tabs = [(await browser.new_tab(url))["id"] for _ in range(2)]
         monitor = TrafficMonitor()
         try:
@@ -116,6 +120,7 @@ async def test_real_details_two_tabs_raw_replay_and_generation(monkeypatch):
             offset, result = 0, bytearray()
             while True:
                 chunk = await monitor.request_body(tab, ids["binary"], offset=offset, limit=7777)
+                assert chunk["data"] is not None, {k: chunk[k] for k in ("unavailable_reason", "total_bytes", "retained_bytes", "offset")}
                 result.extend(base64.b64decode(chunk["data"]) if chunk["encoding"] == "base64" else chunk["data"].encode())
                 if chunk["next_offset"] is None:
                     break
@@ -125,7 +130,16 @@ async def test_real_details_two_tabs_raw_replay_and_generation(monkeypatch):
             assert (await monitor.request_detail(tab, ids["503"], fields=["status"]))["status"] == 503
             assert (await monitor.request_body(tab, ids["redirect"]))["unavailable_reason"] == "redirect_body_unavailable"
             assert (await monitor.request_body(tab, ids["fail"]))["unavailable_reason"] == "no_response"
+            monitor.body_timeout_ms = 150
             assert (await monitor.request_body(tab, ids["stream"]))["unavailable_reason"] == "timeout"
+            proof = {"detail": detail, "request_body": body, "form_body": form,
+                     "binary_sha256": hashlib.sha256(result).hexdigest(), "binary_total_bytes": len(result),
+                     "tab_capture_ids": [monitor.list(t, "network")["capture_id"] for t in tabs],
+                     "events": [monitor.list(t, "network", limit=1000) for t in tabs]}
+            (tmp_path / "network-detail-consumer.json").write_text(json.dumps(proof, indent=2))
+            for index, captured_tab in enumerate(tabs):
+                assert await browser._page(captured_tab).locator("h1").inner_text() == "Quiet fixture"
+                await browser._page(captured_tab).screenshot(path=str(tmp_path / f"network-details-tab-{index}.png"))
             first = monitor.list(tab, "network")["capture_id"]
             await monitor.stop(tab, "network")
             await monitor.start(browser._page(tab), tab)
@@ -133,6 +147,7 @@ async def test_real_details_two_tabs_raw_replay_and_generation(monkeypatch):
             with pytest.raises(ValueError, match="generation"):
                 await monitor.replay_source(tab, ids["json"])
         finally:
+            release_streams.set()
             await monitor.close()
         assert not monitor._body_cache and monitor._body_bytes == 0
 
@@ -141,7 +156,8 @@ async def test_real_details_two_tabs_raw_replay_and_generation(monkeypatch):
 async def test_real_body_limit_and_eviction(monkeypatch):
     monkeypatch.setenv("BROWSER_NETWORK_BODY_LIMIT", "64")
     monkeypatch.setenv("BROWSER_NETWORK_CACHE_LIMIT", "64")
-    async with detail_site() as url, await BrowserSession.launch(headless=True) as browser:
+    async with detail_site() as site, await BrowserSession.launch(headless=True) as browser:
+        url, release_streams = site
         tab = (await browser.new_tab(url))["id"]
         monitor = TrafficMonitor()
         try:
@@ -156,6 +172,7 @@ async def test_real_body_limit_and_eviction(monkeypatch):
             assert evicted["data"] is None and evicted["unavailable_reason"] == "body_evicted"
             assert monitor._body_bytes <= 64
         finally:
+            release_streams.set()
             await monitor.close()
 
 
@@ -163,6 +180,8 @@ def test_structured_redaction_and_byte_chunks():
     assert "visible" in safe_url("https://example.test/a?q=visible&token=private")
     assert "private" not in safe_url("https://example.test/a?q=visible&token=private")
     assert safe_headers([{"name": "Authorization", "value": "private"}])[0]["value"] == "[redacted]"
+    for name in ("X-Authorization", "X-Cookie", "X-CSRF-Token"):
+        assert safe_headers([{"name": name, "value": "private"}])[0]["value"] == "[redacted]"
     assert json.loads(safe_body(b'{"ordinary":42,"password":"private"}', "application/json"))["ordinary"] == 42
     chunks = [body_chunk("é".encode(), offset=n, limit=1) for n in range(2)]
     assert b"".join(base64.b64decode(c["data"]) for c in chunks) == "é".encode()
@@ -172,7 +191,8 @@ def test_structured_redaction_and_byte_chunks():
 @pytest.mark.parametrize("invalidate", ["stop", "evict", "cancel"])
 async def test_real_concurrent_body_invalidation(monkeypatch, invalidate):
     monkeypatch.setenv("BROWSER_NETWORK_BODY_TIMEOUT_MS", "10000")
-    async with detail_site() as url, await BrowserSession.launch(headless=True) as browser:
+    async with detail_site() as site, await BrowserSession.launch(headless=True) as browser:
+        url, release_streams = site
         tab = (await browser.new_tab(url))["id"]
         page = browser._page(tab)
         monitor = TrafficMonitor()
@@ -210,6 +230,7 @@ async def test_real_concurrent_body_invalidation(monkeypatch, invalidate):
                     await pending
                 assert capture.active
         finally:
+            release_streams.set()
             if pending is not None and not pending.done():
                 pending.cancel()
             await monitor.close()

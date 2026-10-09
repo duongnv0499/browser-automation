@@ -119,7 +119,7 @@ async def test_real_http_status_failure_redirect_scope_and_cursor(tmp_path):
             await asyncio.sleep(0.1)
             assert monitor.list(tab, "network")["events"] == []
             await page.click("#http")
-            result = await until(monitor, tab, "network", lambda r: any(e["event"] == "requestfinished" and "/503" in e["url"] for e in r["events"]) and any(e["event"] == "requestfailed" for e in r["events"]))
+            result = await until(monitor, tab, "network", lambda r: all(any(e["event"] == "requestfinished" and path in e["url"] for e in r["events"]) for path in ("/503", "/ok")) and any(e["event"] == "requestfailed" for e in r["events"]))
             events = result["events"]
             assert any(e["event"] == "response" and e["status"] == 503 for e in events)
             assert not any(e["event"] == "requestfailed" and "/503" in e["url"] for e in events)

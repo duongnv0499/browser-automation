@@ -11,6 +11,11 @@ _SENSITIVE = re.compile(r"password|passwd|secret|token|api[-_]?key|authorization
 PRIVACY_NOTE = "Selected network data may be sent to model providers. Default redaction is best effort; arbitrary text/binary data may contain secrets."
 
 
+def is_sensitive_header(name: str) -> bool:
+    """Classify credential-like headers consistently for export and forwarding."""
+    return bool(_SENSITIVE.search(name))
+
+
 def sensitive_allowed(include_sensitive: bool) -> bool:
     if not isinstance(include_sensitive, bool):
         raise ValueError("include_sensitive must be boolean")
@@ -45,7 +50,7 @@ def safe_headers(headers, include_sensitive: bool = False) -> list[dict]:
     for header in headers:
         name, value = str(header["name"]), str(header["value"])
         if not include_sensitive:
-            if _SENSITIVE.search(name):
+            if is_sensitive_header(name):
                 value = "[redacted]"
             elif name.lower() in {"location", "referer", "referrer"}:
                 value = safe_url(value)
