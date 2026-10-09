@@ -49,11 +49,10 @@ def describe_dom(observation: dict) -> dict:
                 if key in alert:
                     item[key] = alert[key]
             alerts.append(item)
-    for e in elements:
-        if e.get("role") in {"alert", "status"} and e.get("name"):
-            alerts.append({"target": e.get("id"), "text": str(e["name"])[:240], "source": "dom"})
-    haystack = (text + "\n" + "\n".join(str(e.get("name", ""))[:240] for e in elements)
-                + "\n" + "\n".join(a["text"] for a in alerts)).lower()
+    rendered = (text + "\n" + "\n".join(a["text"] for a in alerts)).lower()
+    control_labels = "\n".join(str(e.get("name", ""))[:240] for e in elements
+                               if e.get("role") not in {"alert", "status"}).lower()
+    haystack = rendered + "\n" + control_labels
     patterns = [("captcha", r"\bcaptcha\b|verify (?:that )?you are human|human verification"),
                 ("error", r"something went wrong|failed to load|unable to load|an error occurred|service unavailable|page (?:isn't|is not) working"),
                 ("login", r"sign in to continue|log in to continue|authentication required"),
@@ -63,7 +62,9 @@ def describe_dom(observation: dict) -> dict:
         match = re.search(pattern, haystack)
         if match:
             state = candidate
-            evidence.append({"kind": "visible_text_match", "text": match.group(0)[:120], "source": "dom"})
+            rendered_match = re.search(pattern, rendered)
+            evidence.append({"kind": "rendered_text_match" if rendered_match else "accessible_control_label_match",
+                             "text": (rendered_match or match).group(0)[:120], "source": "dom"})
             break
     if state == "unknown" and any(e.get("input_type") == "password" or e.get("type") == "password" for e in elements):
         state = "login"
@@ -101,7 +102,8 @@ def reload_approval_reason(observation: dict, policy: dict | None = None) -> str
             risky = True
     if risky:
         return "Reload may discard nonempty editable, sensitive, or unsaved data. " + WARNING
-    if dom["state"] != "error" or dom["coverage_status"] != "complete" or observation.get("truncated"):
+    rendered_error = any(e.get("kind") == "rendered_text_match" for e in dom["evidence"])
+    if dom["state"] != "error" or not rendered_error or dom["coverage_status"] != "complete" or observation.get("truncated"):
         return "Reload requires host approval: sufficient complete DOM error evidence is unavailable. " + WARNING
     if _origin(str(observation.get("url", ""))) not in policy.get("reload_without_approval_origins", []):
         return "Reload origin is not explicitly approved by host recovery policy. " + WARNING

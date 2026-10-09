@@ -30,7 +30,8 @@
     "visual_result": "source vision, state, summary, visible_text <=8x240, observed regions <=8, recovery_recommended, self_reported_confidence uncalibrated, observation_id, capture_scope",
     "progress": "seq increasing, checkpoint observe/needs_user/reobserve/blocked/done/cancelled, step executed action count, status, page_state structural state/source/coverage_status/recovery_available/approval_required/capture_scope; no typed secrets/raw text/screenshots; identical checkpoints debounced 250ms",
     "progress_errors": "Callback failure disables further callbacks, stops input and returns progress_error plus error_diagnostic; terminal delivery failures also return result without throwing/repeating",
-    "browser_errors": "BrowserError serialized lazily by existing error_payload in error_diagnostic preserving actual changed-region/reobserve info; unexpected errors retain sanitized type only"
+    "browser_errors": "BrowserError serialized lazily by existing error_payload in error_diagnostic preserving actual changed-region/reobserve info; unexpected errors retain sanitized type only",
+    "rendered_recovery_evidence": "Only observation rendered text or collector visible_alerts can establish rendered_text_match for approval waiver; accessible_control_label_match never grants reload authority; role alert/status accessible-name fallback removed."
   },
   "tests_prepared": [
     "classification/provenance",
@@ -43,11 +44,11 @@
   ],
   "verification": {
     "command": "BROWSER_AGENT_LIBRARY_PATH=/home/claw/.local/lib/chromium/usr/lib/x86_64-linux-gnu uv run pytest tests/test_agent.py tests/test_providers.py tests/test_page_state.py -q",
-    "result": "53 passed in 10.33s",
+    "result": "56 passed in 11.26s after rendered-evidence review repair",
     "scope": "Owned tests including actual Chromium canvas and browser agent local HTTP consumer fixtures; deterministic provider not live OCR",
     "evidence": [
-      "/tmp/pytest-of-claw/pytest-1746/test_real_viewport_local_http_0/visual-evidence.json",
-      "/tmp/pytest-of-claw/pytest-1746/test_real_viewport_local_http_0/deterministic-viewport-visual.png"
+      "/tmp/pytest-of-claw/pytest-1749/test_real_viewport_local_http_0/visual-evidence.json",
+      "/tmp/pytest-of-claw/pytest-1749/test_real_viewport_local_http_0/deterministic-viewport-visual.png"
     ]
   }
 }

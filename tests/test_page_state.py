@@ -149,3 +149,20 @@ def test_noninteractive_collected_alerts_have_dom_provenance():
     assert result["visible_alerts"][0]["bounds"] == observation["visible_alerts"][0]["bounds"]
     assert observation["elements"] == []  # alert is not manufactured into an action target
 
+
+
+@pytest.mark.parametrize("role", ["alert", "status", "button"])
+def test_accessible_only_error_label_cannot_waive_reload_approval(role):
+    observation = page("Actual rendered content", elements=[{"id": "e1", "role": role,
+        "name": "Something went wrong", "operations": ["click"]}], visible_alerts=[])
+    policy = {"reload_without_approval_origins": ["https://fixture.test"]}
+    result = describe_dom(observation)
+    assert result["visible_alerts"] == []
+    assert not any(e["kind"] == "rendered_text_match" for e in result["evidence"])
+    assert reload_approval_reason(observation, policy) is not None
+    if role == "button":
+        assert result["state"] == "error"
+        assert result["evidence"][0]["kind"] == "accessible_control_label_match"
+    else:
+        assert result["state"] == "ready"
+
