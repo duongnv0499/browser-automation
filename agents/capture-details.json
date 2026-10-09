@@ -1,0 +1,21 @@
+{
+  "owner": "CaptureDetails",
+  "status": "READY_FOR_COORDINATED_VERIFICATION",
+  "owned_paths": ["src/browser_automation/browser_monitor.py", "src/browser_automation/browser_network_data.py", "tests/test_network_details.py", "agents/capture-details.json"],
+  "contract": {
+    "request_detail": "async(tab_id, request_id, fields=None, include_sensitive=False); selected fields plus capture_id/state/provenance/privacy/unavailable_fields",
+    "request_body": "async(tab_id, request_id, part=response, offset=0, limit=65536, include_sensitive=False); byte offset chunks with utf-8 or base64, raw total and redacted export total, explicit availability",
+    "replay_source": "async(tab_id, request_id); private immutable MappingProxyType URL/method/header-array tuple/body bytes/capture_id/tab_id/request_id",
+    "identity": "r<capture_uuid>:<counter>; stopped/restarted/evicted IDs rejected",
+    "defaults": {"BROWSER_NETWORK_BODY_LIMIT": 16777216, "BROWSER_NETWORK_CACHE_LIMIT": 67108864, "BROWSER_NETWORK_BODY_TIMEOUT_MS": 10000},
+    "sensitive_export": "Explicit include_sensitive=true AND host BROWSER_NETWORK_SENSITIVE=1",
+    "limitations": ["Page event scope, not all browser targets; late capture cannot reconstruct prior traffic", "Playwright Response.body materializes whole response before retention capping; host cap bounds retained buffers, not temporary SDK/browser allocation", "Default arbitrary text/binary redaction is best effort, not a secrecy guarantee", "SDK browser response handles have no dispose API; references are released on eviction/stop; replay APIResponse disposal belongs ReplayEngine"]
+  },
+  "research": [
+    {"url": "https://playwright.dev/python/docs/api/class-request", "accessed": "2026-10-09", "finding": "headers_array includes security headers and preserves duplicate entries; post_data_buffer exact bytes; requestfailed distinct from HTTP non-2xx; frame may throw"},
+    {"url": "https://playwright.dev/python/docs/api/class-response", "accessed": "2026-10-09", "finding": "body returns bytes; headers_array duplicates; finished waits; HTTP-version method version-dependent"}
+  ],
+  "verification": "Not run: worker gate. Installed async Request/Response signatures inspected, not a behavior check.",
+  "requested_parent_checks": ["tests/test_browser_monitor.py", "tests/test_network_details.py", "coordinated two-tab real browser workflow with source replay consumers"],
+  "preserved": ["doc.md", "issues/", "installed configuration and secrets", "existing metadata list redaction and WebSocket behavior"]
+}

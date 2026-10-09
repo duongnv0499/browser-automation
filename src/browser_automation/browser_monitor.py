@@ -1,4 +1,4 @@
-"""Opt-in, page-scoped traffic metadata; never reads HTTP bodies or credentials.
+"""Opt-in page-scoped network details and WebSocket metadata.
 
 Contracts researched 2026-10-09:
 https://playwright.dev/python/docs/api/class-request
@@ -19,6 +19,20 @@ from typing import Any
 import weakref
 from itertools import islice
 from urllib.parse import urlsplit, urlunsplit
+from types import MappingProxyType
+from uuid import uuid4
+
+from .browser_network_data import PRIVACY_NOTE, body_chunk, safe_body, safe_headers, safe_url, sensitive_allowed
+
+
+def _host_positive(name: str, default: int) -> int:
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except ValueError:
+        raise ValueError(f"{name} must be a positive integer") from None
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return value
 
 
 KINDS = {"network", "websocket"}
@@ -87,6 +101,9 @@ class _Capture:
     active: bool = True
     incomplete_history: bool = True
     cleanup_diagnostics: list[str] = field(default_factory=list)
+    capture_id: str = field(default_factory=lambda: uuid4().hex)
+    records: OrderedDict = field(default_factory=OrderedDict)
+    tasks: set = field(default_factory=set)
 
     def accepts(self, url: str | None) -> bool:
         return self.url_filter is None or (url is not None and self.url_filter in url)
@@ -109,7 +126,7 @@ class _Capture:
             self.incomplete_history = True
 
     def metadata(self) -> dict:
-        return {"tab_id": self.tab_id, "kind": self.kind, "active": self.active,
+        return {"tab_id": self.tab_id, "kind": self.kind, "active": self.active, "capture_id": self.capture_id,
                 "capture_started_at": self.capture_started_at, "incomplete_history": self.incomplete_history,
                 "history_note": "Only events observed after capture start are available; preexisting requests/sockets may be incomplete.",
                 "max_events": self.max_events, "url_filter": self.url_filter, "payloads": self.payloads,
@@ -131,6 +148,11 @@ class TrafficMonitor:
         self._lock = asyncio.Lock()
         self._closed = False
         self.cleanup_diagnostics: deque[str] = deque(maxlen=32)
+        self.body_limit = _host_positive("BROWSER_NETWORK_BODY_LIMIT", 16 * 1024 * 1024)
+        self.body_cache_limit = _host_positive("BROWSER_NETWORK_CACHE_LIMIT", 64 * 1024 * 1024)
+        self.body_timeout_ms = _host_positive("BROWSER_NETWORK_BODY_TIMEOUT_MS", 10000)
+        self._body_cache: OrderedDict = OrderedDict()
+        self._body_bytes = 0
 
     async def start(self, page: Any, tab_id: str, kind: str = "network", max_events: int = 256,
                     url_filter: str | None = None, payloads: bool = False, max_payload_bytes: int = 512) -> dict:
@@ -192,9 +214,15 @@ class TrafficMonitor:
                 c.identity += 1
                 prior = request.redirected_from
                 previous = c.requests.get(weakref.ref(prior)) if prior is not None else None
-                c.bounded_identity(c.requests, key, {"request_id": f"r{c.identity}", "url": sanitize_url(request.url),
+                request_id = f"r{c.capture_id}:{c.identity}"
+                c.bounded_identity(c.requests, key, {"request_id": request_id, "url": sanitize_url(request.url),
                                                     "method": str(request.method)[:32],
                                                     "redirected_from": previous["request_id"] if previous else None})
+                c.records[request_id] = {"request": request, "response": None, "state": "pending", "headers": None,
+                                         "source": None, "body_status": {}, "info": dict(c.requests[key])}
+                if len(c.records) > c.max_events:
+                    old_id, old = c.records.popitem(last=False)
+                    self._drop_record(c, old_id, old)
             return c.requests[key]
 
         def event(name: str, request: Any, **extra: Any) -> None:
@@ -204,15 +232,188 @@ class TrafficMonitor:
                 c.emit(name, **info, timing=timing, **extra)
 
         def response(response: Any) -> None:
+            info = identity(response.request)
+            c.records[info["request_id"]]["response"] = response
             content_type = response.headers.get("content-type", "").split(";", 1)[0].lower()
             if content_type not in _CONTENT_TYPES:
                 content_type = None
             event("response", response.request, status=response.status, content_type=content_type)
 
+        def finished(request: Any, failed: bool = False) -> None:
+            info = identity(request)
+            c.records[info["request_id"]]["state"] = "failed" if failed else "finished"
+            event("requestfailed" if failed else "requestfinished", request,
+                  **({"failure": _failure(request.failure)} if failed else {}))
+
         self._listen(c, c.page, "request", lambda r: event("request", r))
         self._listen(c, c.page, "response", response)
-        self._listen(c, c.page, "requestfinished", lambda r: event("requestfinished", r))
-        self._listen(c, c.page, "requestfailed", lambda r: event("requestfailed", r, failure=_failure(r.failure)))
+        self._listen(c, c.page, "requestfinished", finished)
+        self._listen(c, c.page, "requestfailed", lambda r: finished(r, True))
+
+    def _record(self, tab_id: str, request_id: str) -> tuple[_Capture, dict]:
+        c = self._captures.get((tab_id, "network"))
+        if c is None or not isinstance(request_id, str) or request_id not in c.records:
+            raise ValueError("Request unavailable: capture stopped, generation changed, unknown ID or record evicted")
+        record = c.records[request_id]
+        if not c.accepts(record["info"]["url"]):
+            raise ValueError("Request is outside this capture's URL filter")
+        return c, record
+
+    def _drop_record(self, c: _Capture, request_id: str, record: dict) -> None:
+        for part in ("request", "response"):
+            cached = self._body_cache.pop((c.capture_id, request_id, part), None)
+            if cached is not None:
+                self._body_bytes -= len(cached)
+        for task in record.get("tasks", {}).values():
+            task.cancel()
+
+    async def _headers(self, record: dict, part: str) -> list:
+        key = f"{part}_headers"
+        if key not in record:
+            if record[part] is None:
+                return []
+            record[key] = await asyncio.wait_for(record[part].headers_array(), self.body_timeout_ms / 1000)
+        return record[key]
+
+    async def request_detail(self, tab_id: str, request_id: str, fields: list[str] | None = None,
+                             include_sensitive: bool = False) -> dict:
+        sensitive_allowed(include_sensitive)
+        allowed = {"url", "method", "query", "request_headers", "response_headers", "status", "timing", "failure", "resource_type", "sizes", "frame", "server_addr", "security_details", "http_version"}
+        selected = ["url", "method", "query", "request_headers", "response_headers", "status", "timing", "failure", "resource_type"] if fields is None else fields
+        if not isinstance(selected, list) or any(not isinstance(f, str) or f not in allowed for f in selected):
+            raise ValueError("fields must be a list of supported network detail field names")
+        c, record = self._record(tab_id, request_id)
+        request, response = record["request"], record["response"]
+        result = {"tab_id": tab_id, "request_id": request_id, "capture_id": c.capture_id,
+                  "state": record["state"], "provenance": "page_network_event", "privacy_note": PRIVACY_NOTE,
+                  "include_sensitive": include_sensitive, "redaction_best_effort": not include_sensitive,
+                  "unavailable_fields": {}, "redirected_from": record["info"]["redirected_from"]}
+        from urllib.parse import parse_qsl
+        for name in selected:
+            try:
+                if name == "url":
+                    value = safe_url(request.url, include_sensitive)
+                elif name == "query":
+                    value = [{"name": k, "value": v} for k, v in parse_qsl(urlsplit(safe_url(request.url, include_sensitive)).query, keep_blank_values=True)]
+                elif name == "method":
+                    value = request.method
+                elif name.endswith("_headers"):
+                    part = name.split("_", 1)[0]
+                    if record[part] is None:
+                        result["unavailable_fields"][name] = "response_pending" if record["state"] == "pending" else "no_response"
+                        continue
+                    value = safe_headers(await self._headers(record, part), include_sensitive)
+                elif name == "status":
+                    value = response.status if response is not None else None
+                elif name == "timing":
+                    value = {k: v for k, v in request.timing.items() if k in _TIMING_KEYS and isinstance(v, (int, float)) and math.isfinite(v)}
+                elif name == "failure":
+                    value = _failure(request.failure) if request.failure else None
+                elif name == "resource_type":
+                    value = request.resource_type
+                elif name == "frame":
+                    value = {"url": safe_url(request.frame.url, include_sensitive)}
+                elif name == "sizes":
+                    value = await asyncio.wait_for(request.sizes(), self.body_timeout_ms / 1000)
+                else:
+                    if response is None:
+                        result["unavailable_fields"][name] = "response_pending" if record["state"] == "pending" else "no_response"
+                        continue
+                    value = await asyncio.wait_for(getattr(response, name)(), self.body_timeout_ms / 1000)
+                result[name] = value
+            except asyncio.TimeoutError:
+                result["unavailable_fields"][name] = "timeout"
+            except Exception:
+                result["unavailable_fields"][name] = "browser_unavailable"
+        self._record(tab_id, request_id)
+        return result
+
+    async def replay_source(self, tab_id: str, request_id: str):
+        c, record = self._record(tab_id, request_id)
+        headers = await self._headers(record, "request")
+        body = record["request"].post_data_buffer
+        if body is not None and len(body) > min(self.body_limit, self.body_cache_limit):
+            raise ValueError("Exact replay body exceeds configured network body retention limit")
+        self._record(tab_id, request_id)
+        return MappingProxyType({"tab_id": tab_id, "request_id": request_id, "capture_id": c.capture_id,
+                                 "url": record["request"].url, "method": record["request"].method,
+                                 "headers": tuple(MappingProxyType(dict(h)) for h in headers), "body": body})
+
+    async def _load_body(self, c: _Capture, request_id: str, record: dict, part: str) -> bytes | None:
+        key = (c.capture_id, request_id, part)
+        if key in self._body_cache:
+            self._body_cache.move_to_end(key)
+            return self._body_cache[key]
+        if part in record["body_status"]:
+            return None
+        handle = record[part]
+        if handle is None:
+            if record["state"] != "pending":
+                record["body_status"][part] = {"unavailable_reason": "no_response", "source_complete": False}
+            return None
+        try:
+            if part == "request":
+                data = handle.post_data_buffer or b""
+            else:
+                if 300 <= handle.status < 400 and handle.status != 304:
+                    record["body_status"][part] = {"unavailable_reason": "redirect_body_unavailable", "source_complete": False}
+                    return None
+                data = await asyncio.wait_for(handle.body(), self.body_timeout_ms / 1000)
+            total = len(data)
+            retained = data[:min(self.body_limit, self.body_cache_limit)]
+            while self._body_cache and self._body_bytes + len(retained) > self.body_cache_limit:
+                old_key, old_body = self._body_cache.popitem(last=False)
+                self._body_bytes -= len(old_body)
+                for capture in self._captures.values():
+                    if capture.capture_id == old_key[0] and old_key[1] in capture.records:
+                        capture.records[old_key[1]]["body_status"][old_key[2]].update(unavailable_reason="body_evicted", source_complete=False)
+                        break
+            record["body_status"][part] = {"total_bytes": total, "truncated": total > len(retained),
+                                            "source_complete": total == len(retained),
+                                            "unavailable_reason": "body_limit" if total > len(retained) else None}
+            if not c.active or request_id not in c.records:
+                return None
+            self._body_cache[key] = retained
+            self._body_bytes += len(retained)
+            return retained
+        except asyncio.TimeoutError:
+            record["body_status"][part] = {"unavailable_reason": "timeout", "source_complete": False}
+        except Exception:
+            record["body_status"][part] = {"unavailable_reason": "transport_failed" if record["state"] == "failed" else "browser_body_unavailable", "source_complete": False}
+        return None
+
+    async def request_body(self, tab_id: str, request_id: str, part: str = "response", offset: int = 0,
+                           limit: int = 65536, include_sensitive: bool = False) -> dict:
+        sensitive_allowed(include_sensitive)
+        if part not in {"request", "response"}:
+            raise ValueError("part must be request or response")
+        body_chunk(None, offset=offset, limit=limit)
+        c, record = self._record(tab_id, request_id)
+        tasks = record.setdefault("tasks", {})
+        if part not in tasks:
+            task = asyncio.create_task(self._load_body(c, request_id, record, part))
+            tasks[part] = task
+            c.tasks.add(task)
+            def completed(done: asyncio.Task) -> None:
+                c.tasks.discard(done)
+                if tasks.get(part) is done:
+                    tasks.pop(part, None)
+            task.add_done_callback(completed)
+        task = tasks[part]
+        data = await asyncio.shield(task)
+        self._record(tab_id, request_id)
+        status = dict(record["body_status"].get(part, {"unavailable_reason": "response_pending", "source_complete": False}))
+        if data is not None:
+            try:
+                content_type = next((h["value"] for h in await self._headers(record, part) if h["name"].lower() == "content-type"), "")
+            except Exception:
+                content_type = ""
+                status["unavailable_reason"] = status.get("unavailable_reason") or "content_type_unavailable"
+            data = safe_body(data, content_type, include_sensitive)
+        return {"tab_id": tab_id, "request_id": request_id, "capture_id": c.capture_id, "part": part,
+                "privacy_note": PRIVACY_NOTE, "redaction_best_effort": not include_sensitive,
+                "export_total_bytes": len(data) if data is not None else None,
+                **body_chunk(data, offset=offset, limit=limit, **status)}
 
     def _websocket(self, c: _Capture) -> None:
         def socket(params: dict) -> dict:
@@ -295,6 +496,12 @@ class TrafficMonitor:
             except Exception:
                 if not c.page.is_closed() and len(c.cleanup_diagnostics) < 32:
                     c.cleanup_diagnostics.append("cdp_detach_failed")
+        for request_id, record in c.records.items():
+            self._drop_record(c, request_id, record)
+        if c.tasks:
+            await asyncio.gather(*tuple(c.tasks), return_exceptions=True)
+        c.tasks.clear()
+        c.records.clear()
         c.requests.clear()
         c.sockets.clear()
         c.events.clear()
