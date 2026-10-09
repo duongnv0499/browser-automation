@@ -17,6 +17,10 @@ def test_bounded_surface_contracts():
     assert {f"{kind}_{op}" for kind in ("network", "websocket") for op in ("start", "list", "stop")} <= names
     validate_arguments("new_tab", {"session_id": "s", "wait_until": "commit", "timeout_ms": 150})
     validate_arguments("act", {"session_id": "s", "tab_id": "t", "action": {"observation_id": "r", "operation": "reload", "timeout_ms": 100}})
+    new_tab = next(spec for name, _, spec in TOOLS if name == "new_tab")
+    assert new_tab["properties"]["wait_until"]["enum"] == ["commit", "domcontentloaded", "load"]
+    with pytest.raises(ServiceError):
+        validate_arguments("new_tab", {"session_id": "s", "wait_until": "networkidle"})
     for command, args in [("new_tab", {"session_id": "s", "timeout_ms": 0}), ("run", {"session_id": "s", "tab_id": "t", "goal": "x", "max_steps": 201}), ("network_start", {"session_id": "s", "tab_id": "t", "max_events": 4097}), ("observe", {"session_id": "s", "tab_id": "t", "recovery_policy": {}})]:
         with pytest.raises(ServiceError) as failure:
             validate_arguments(command, args)

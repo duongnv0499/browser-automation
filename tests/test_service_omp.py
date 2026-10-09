@@ -87,6 +87,9 @@ try {
   if (!updates.length || result.status !== "success") throw new Error("Missing progress or final result");
   if (new Set(updates.map(update => update.request_id)).size !== 1) throw new Error("Lost request IDs");
   if (!(await invoke("tabs", {session_id:opened.session_id})).tabs.some(tab => tab.id === created.tab.id)) throw new Error("Worker session lost");
+  const failed = await invoke("act", {...args,action:{observation_id:"expired-revision",operation:"wait",seconds:0.1}});
+  if (failed.status !== "error" || failed.error.code !== "unknown_observation" || failed.error.recommended_next_action !== "reobserve") throw new Error("Structured real-worker error lost");
+  console.log(JSON.stringify({structured_error:failed}));
   await invoke("close", {session_id:opened.session_id});
   console.log(JSON.stringify({final:result.status,updates:updates.length}));
 } finally { shutdown(); }
@@ -98,3 +101,30 @@ try {
     frames = [json.loads(line) for line in output.decode().splitlines()]
     assert "interim" in frames[0] and frames[-1]["final"] == "success"
     (tmp_path / "omp-progress-proof.json").write_text(json.dumps(frames, indent=2))
+
+
+async def test_omp_changed_region_error_visible_in_result(tmp_path):
+    """Fault-only transport fixture, not fabricated browser-success evidence."""
+    extension = Path(__file__).resolve().parents[1] / "integrations/omp/browser-tools.mjs"
+    worker = tmp_path / "diagnostic-worker"
+    worker.write_text("#!" + sys.executable + "\nimport json,sys\nfor line in sys.stdin:\n request=json.loads(line)\n print(json.dumps({'id':request['id'],'error':{'code':'stale_observation','message':'Observed target pixels changed','diagnostic':{'code':'target_pixels_changed','changed_region':{'x':10,'y':20,'width':30,'height':40}},'recommended_next_action':'reobserve'}}),flush=True)\n")
+    worker.chmod(0o700)
+    script = tmp_path / "diagnostic-consumer.mjs"
+    script.write_text('''import extension from ''' + json.dumps(extension.as_uri()) + ''';
+const chain = new Proxy(() => {}, {get:() => chain,apply:() => chain});
+let tool; let shutdown;
+extension({zod:chain,registerTool(value){tool=value;},registerCommand(){},on(name,callback){if(name==="session_shutdown")shutdown=callback;}});
+try {
+ const result=await tool.execute("fault-proof",{command:"act",arguments:{}});
+ const text=JSON.parse(result.content.find(part=>part.type==="text").text);
+ if(text.status!=="error" || text.error.diagnostic.changed_region.width!==30 || text.error.recommended_next_action!=="reobserve")throw new Error("Parent text diagnostics lost");
+ if(result.details.error.diagnostic.code!=="target_pixels_changed" || result.details.error.diagnostic.changed_region.height!==40)throw new Error("Parent structured diagnostics lost");
+ console.log(JSON.stringify(result));
+} finally {shutdown();}
+''')
+    process = await asyncio.create_subprocess_exec("node", str(script), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env={**os.environ, "BROWSER_AGENT_PYTHON": str(worker)})
+    output, errors = await asyncio.wait_for(process.communicate(), 15)
+    assert process.returncode == 0, errors.decode()
+    result = json.loads(output)
+    assert result["details"]["error"]["diagnostic"]["changed_region"] == {"x": 10, "y": 20, "width": 30, "height": 40}
+    (tmp_path / "omp-structured-error-proof.json").write_text(json.dumps(result, indent=2))

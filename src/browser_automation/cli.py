@@ -130,7 +130,7 @@ def main():
             p.add_argument("--provider", choices=["openrouter", "openai"], default="openrouter")
             p.add_argument("--model")
             p.add_argument("--max-steps", type=int, default=50)
-            p.add_argument("--wait-until", choices=["commit", "domcontentloaded", "load", "networkidle"], default="domcontentloaded")
+            p.add_argument("--wait-until", choices=["commit", "domcontentloaded", "load"], default="domcontentloaded")
             p.add_argument("--timeout-ms", type=int, default=15000)
             p.add_argument("--interpret-visual", action="store_true", help="Paid semantic screenshot interpretation with explicit provenance")
             p.add_argument("--progress", action="store_true", help="Emit semantic progress JSON before final result")

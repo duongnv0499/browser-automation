@@ -22,7 +22,7 @@ export default function browserTools(pi) {
         return;
       }
       pending.delete(response.id);
-      response.error ? waiter.reject(new Error(`${response.error.code}: ${response.error.message}`)) : waiter.resolve(response.result);
+      waiter.resolve(response.error ? { status: "error", error: response.error } : response.result);
     });
     const fail = error => {
       for (const [id, waiter] of pending) {
