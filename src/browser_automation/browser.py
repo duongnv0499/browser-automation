@@ -10,6 +10,7 @@ import os
 import platform
 import time
 import uuid
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,7 @@ import httpx
 from playwright.async_api import async_playwright, Error as PlaywrightError, TimeoutError as PlaywrightTimeoutError
 from PIL import Image, ImageChops
 from .browser_monitor import TrafficMonitor
+from .browser_requests import RequestExecutor
 from .page_state import describe_dom
 from .browser_files import ScopedFiles, FilePolicyError, MAX_FILE_BYTES, MAX_UPLOAD_BYTES, MAX_UPLOAD_FILES
 
@@ -114,6 +116,11 @@ class BrowserSession:
         self._world_name = 'browser-automation-' + uuid.uuid4().hex
         self._monitor = TrafficMonitor()
         self._page_listeners: dict[Any, list[tuple[str, Any]]] = {}
+        self._requests = RequestExecutor()
+        self._network_context_listeners: dict[Any, Any] = {}
+        self._network_future_options: dict[str, Any] | None = None
+        self._network_tasks: set[asyncio.Task] = set()
+        self._network_future_failures: deque[dict[str, str]] = deque(maxlen=64)
 
     @staticmethod
     def _allowed_url(url: str, *, subframe: bool = False) -> bool:
@@ -408,6 +415,130 @@ class BrowserSession:
     async def monitor_stop(self, tab_id: str, kind: str) -> dict[str, Any]:
         async with self._lock:
             return await self._monitor.stop(tab_id, kind)
+
+    async def network_detail(self, tab_id: str, request_id: str, fields: list[str] | None = None, include_sensitive: bool = False) -> dict[str, Any]:
+        async with self._lock:
+            self._page(tab_id)
+            if request_id.startswith('call'):
+                return await self._requests.detail(tab_id, request_id, fields, include_sensitive)
+            return await self._monitor.request_detail(tab_id, request_id, fields, include_sensitive)
+
+    async def network_body(self, tab_id: str, request_id: str, part: str = 'response', offset: int = 0, limit: int = 65536, include_sensitive: bool = False) -> dict[str, Any]:
+        async with self._lock:
+            self._page(tab_id)
+            if request_id.startswith('call'):
+                return await self._requests.body(tab_id, request_id, part, offset, limit, include_sensitive)
+            return await self._monitor.request_body(tab_id, request_id, part, offset, limit, include_sensitive)
+
+    async def network_call(self, tab_id: str, **spec: Any) -> dict[str, Any]:
+        async with self._lock:
+            return self._requests.prepare(tab_id, self._page(tab_id), spec)
+
+    async def network_replay(self, tab_id: str, request_id: str, target_tab_id: str | None = None, **overrides: Any) -> dict[str, Any]:
+        async with self._lock:
+            source_page = self._page(tab_id)
+            source = await self._monitor.replay_source(tab_id, request_id)
+            target = target_tab_id or tab_id
+            return self._requests.prepare(target, self._page(target), overrides, source=source, source_context=source_page.context)
+
+    async def _network_plan(self, plan_id: str) -> dict[str, Any]:
+        plan = self._requests.plan(plan_id)
+        page = self._page(plan.tab_id)
+        if page.context is not plan.context:
+            raise UnsafeActionError('Network plan browser context changed')
+        if page.url != plan.page_url:
+            raise UnsafeActionError('Network plan target document URL changed')
+        if plan.source:
+            tab, request, capture = plan.source
+            self._page(tab)
+            source = await self._monitor.replay_source(tab, request)
+            if source['capture_id'] != capture:
+                raise UnsafeActionError('Network source capture changed')
+        return self._requests.preview(plan_id)
+
+    async def network_plan(self, plan_id: str) -> dict[str, Any]:
+        async with self._lock:
+            return await self._network_plan(plan_id)
+
+    async def network_execute(self, plan_id: str, approved: bool = False) -> dict[str, Any]:
+        async with self._lock:
+            await self._network_plan(plan_id)
+            return await self._requests.execute(plan_id, approved=approved)
+
+    def _network_new_page(self, page: Any) -> None:
+        if self._closed or self._network_future_options is None:
+            return
+        self._sync_pages()
+        tab_id = self._ids[page]
+        options = dict(self._network_future_options)
+        async def capture() -> None:
+            try:
+                self._ensure_safe(page)
+                await self._monitor.start(page, tab_id, 'network', **options)
+            except Exception as exc:
+                self._network_future_failures.append({'tab_id': tab_id, 'error_type': type(exc).__name__})
+        task = asyncio.create_task(capture())
+        self._network_tasks.add(task)
+        task.add_done_callback(self._network_tasks.discard)
+
+    async def network_start_many(self, tab_ids: list[str] | None = None, include_new_tabs: bool = False, **options: Any) -> dict[str, Any]:
+        async with self._lock:
+            self._sync_pages()
+            if not isinstance(include_new_tabs, bool):
+                raise ValueError('include_new_tabs must be boolean')
+            if tab_ids is not None and (not isinstance(tab_ids, list) or any(not isinstance(tab, str) for tab in tab_ids)):
+                raise ValueError('tab_ids must be a list of tab IDs')
+            selected = list(self._pages) if tab_ids is None else list(dict.fromkeys(tab_ids))
+            captures, failures = [], []
+            for tab in selected:
+                try:
+                    captures.append(await self._monitor.start(self._page(tab), tab, 'network', **options))
+                except Exception as exc:
+                    failures.append({'tab_id': tab, 'error_type': type(exc).__name__})
+            if include_new_tabs:
+                self._network_future_options = dict(options)
+                contexts = {self._pages[tab].context for tab in selected if tab in self._pages}
+                if tab_ids is None:
+                    contexts.update(self._browser.contexts)
+                for context in contexts:
+                    if context not in self._network_context_listeners:
+                        callback = self._network_new_page
+                        context.on('page', callback)
+                        self._network_context_listeners[context] = callback
+            return {'captures': captures, 'failures': failures, 'include_new_tabs': self._network_future_options is not None, 'initial_request_race': 'Future page listeners attach at page notification; requests before attachment are not captured'}
+
+    async def network_list_many(self, tab_ids: list[str] | None = None, cursors: dict[str, int] | None = None, limit: int = 100) -> dict[str, Any]:
+        async with self._lock:
+            self._sync_pages()
+            if tab_ids is not None and (not isinstance(tab_ids, list) or any(not isinstance(tab, str) for tab in tab_ids)):
+                raise ValueError('tab_ids must be a list of tab IDs')
+            if cursors is not None and not isinstance(cursors, dict):
+                raise ValueError('cursors must map tab IDs to cursors')
+            selected = list(self._pages) if tab_ids is None else list(dict.fromkeys(tab_ids))
+            captures, failures = [], []
+            for tab in selected:
+                try:
+                    self._page(tab)
+                    captures.append(self._monitor.list(tab, 'network', cursor=(cursors or {}).get(tab), limit=limit))
+                except Exception as exc:
+                    failures.append({'tab_id': tab, 'error_type': type(exc).__name__})
+            return {'captures': captures, 'failures': failures, 'future_capture_failures': list(self._network_future_failures), 'cursor_scope': 'Each capture has an independent tab-scoped cursor'}
+
+    async def network_stop_many(self, tab_ids: list[str] | None = None) -> dict[str, Any]:
+        async with self._lock:
+            self._sync_pages()
+            if tab_ids is not None and (not isinstance(tab_ids, list) or any(not isinstance(tab, str) for tab in tab_ids)):
+                raise ValueError('tab_ids must be a list of tab IDs')
+            if tab_ids is None:
+                self._network_future_options = None
+                for context, callback in self._network_context_listeners.items():
+                    context.remove_listener('page', callback)
+                self._network_context_listeners.clear()
+                for task in tuple(self._network_tasks):
+                    task.cancel()
+                await asyncio.gather(*tuple(self._network_tasks), return_exceptions=True)
+            selected = list(self._pages) if tab_ids is None else list(dict.fromkeys(tab_ids))
+            return {'captures': [await self._monitor.stop(tab, 'network') for tab in selected], 'include_new_tabs': self._network_future_options is not None}
 
     async def _frame_geometry(self, frame: _FrameRef) -> tuple[float, float, dict[str, float]]:
         view = (await self._eval(frame,'({width:innerWidth,height:innerHeight})')
@@ -988,6 +1119,14 @@ class BrowserSession:
             if self._closed:
                 return
             self._closed = True
+            self._network_future_options = None
+            for context, callback in self._network_context_listeners.items():
+                context.remove_listener('page', callback)
+            self._network_context_listeners.clear()
+            for task in tuple(self._network_tasks):
+                task.cancel()
+            await asyncio.gather(*tuple(self._network_tasks), return_exceptions=True)
+            await self._requests.close()
             await self._monitor.close()
             for page, listeners in self._page_listeners.items():
                 for event, callback in listeners:
