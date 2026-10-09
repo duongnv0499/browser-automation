@@ -236,3 +236,47 @@ async def test_real_browser_host_recovery_policy_and_sensitive_approval(monkeypa
                 assert "Something went wrong" in fresh["text"]
                 await call("close_tab", args)
             await call("close", {"session_id": sid})
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(os.environ.get("BROWSER_INTEGRATION_TESTS") != "1", reason="Coordinated real browser verification")
+async def test_official_sdk_websocket_tools_and_host_payload_policy(tmp_path):
+    from mcp import Client, StdioServerParameters
+    from test_browser_monitor import traffic_site
+    import time
+    approvals = tmp_path / "approvals.json"
+    approvals.write_text("[]")
+    env = {**os.environ, "BROWSER_APPROVALS_FILE": str(approvals)}
+    env.pop("BROWSER_MONITOR_PAYLOADS", None)
+    async with traffic_site() as origin, Client(StdioServerParameters(command=sys.executable, args=["-m", "browser_automation.mcp"], env=env), mode="legacy") as client:
+        async def call(name, args):
+            result = await client.call_tool(name, args)
+            assert not result.is_error, result
+            return result.structured_content
+        opened = await call("launch", {"headless": True})
+        sid = opened["session_id"]
+        created = await call("new_tab", {"session_id": sid, "url": origin})
+        args = {"session_id": sid, "tab_id": created["tab"]["id"]}
+        denied = await client.call_tool("websocket_start", {**args, "payloads": True})
+        assert denied.is_error and denied.structured_content["error"]["code"] == "host_policy_required"
+        await call("websocket_start", {**args, "max_events": 32, "url_filter": "/ws"})
+        obs = await call("observe", args)
+        target = next(e["id"] for e in obs["elements"] if e["name"] == "Socket")
+        paused = await call("act", {**args, "action": {"observation_id": obs["id"], "operation": "click", "target": target}})
+        assert paused["status"] == "approval_required"
+        approvals.write_text(json.dumps([{"token": "socket-fixture-host-approval", "binding": paused["binding"], "expires_at": time.time() + 60}]))
+        await call("approved_act", {**args, "observation_id": obs["id"], "approval_token": "socket-fixture-host-approval"})
+        for _ in range(40):
+            captured = await call("websocket_list", {**args, "limit": 32})
+            if {1, 2} <= {e.get("opcode") for e in captured["events"]}:
+                break
+            await asyncio.sleep(0.05)
+        assert {1, 2} <= {e.get("opcode") for e in captured["events"]}
+        assert any(e["event"] == "open" and e["status"] == 101 for e in captured["events"])
+        assert all("text" not in e for e in captured["events"])
+        assert "never-retain" not in json.dumps(captured)
+        next_page = await call("websocket_list", {**args, "cursor": captured["next_cursor"]})
+        assert not next_page["events"]
+        (tmp_path / "websocket-tool-evidence.json").write_text(json.dumps(captured, indent=2))
+        await call("websocket_stop", args)
+        await call("close", {"session_id": sid})

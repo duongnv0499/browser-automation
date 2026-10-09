@@ -1,7 +1,7 @@
 {
   "owner": "Surface",
   "phase": "Scoped verification PASS after authorized fixture repair; awaiting GitOwner evidence commit/global checks",
-  "feature_commit": "315271c pushed origin/main by ReleaseDocs; later consumer visual/cancellation acceptance additions pending evidence commit",
+  "feature_commit": "315271c feature and f9be96f review repairs/evidence pushed origin/main by ReleaseDocs; final websocket consumer test/evidence record pending commit",
   "owned_paths": ["src/browser_automation/service.py", "src/browser_automation/mcp.py", "src/browser_automation/mcp_http.py", "src/browser_automation/cli.py", "integrations/omp/browser-tools.mjs", "pyproject.toml", "uv.lock", ".env.example", "tests/test_service.py", "tests/test_service_stdio.py", "tests/test_service_omp.py", "tests/test_mcp_http.py", "tests/test_mcp_http_browser.py", "tests/test_agent_surface.py", "agents/surface.json"],
   "contracts": {
     "navigation": "new_tab and reload expose wait_until commit/domcontentloaded/load/networkidle and timeout_ms 1..120000",
@@ -22,10 +22,12 @@
       {"command": "uv run --extra http pytest -q tests/test_service.py tests/test_mcp_http.py tests/test_agent_surface.py", "result": "29 passed,3 skipped in4.46s"},
       {"command": "BROWSER_INTEGRATION_TESTS=1 BROWSER_AGENT_LIBRARY_PATH=/home/claw/.local/lib/chromium/usr/lib/x86_64-linux-gnu uv run --extra http pytest -q tests/test_agent_surface.py tests/test_service_stdio.py tests/test_service_omp.py tests/test_mcp_http_browser.py --basetemp=/tmp/browser-surface-proof", "result": "21 passed,3 failed in100.59s; fixture button click correctly paused for approval, so network request never executed. Repaired fixture to explicit safe link and assert act is not approval_required; no policy bypass."},
       {"command": "same env uv run --extra http pytest -q tests/test_agent_surface.py --basetemp=/tmp/browser-surface-progress-proof", "result": "8 passed in23.71s after fixture repair; includes real host-policy reload allowed and sensitive reload exact host token approval"},
-      {"command": "same env uv run --extra http pytest -q tests/test_agent_surface.py --basetemp=/tmp/browser-surface-progress-final", "result": "8 passed in21.13s after strengthening cancellation no-events-at-return assertion and saving transport evidence"}
+      {"command": "same env uv run --extra http pytest -q tests/test_agent_surface.py --basetemp=/tmp/browser-surface-progress-final", "result": "8 passed in21.13s after strengthening cancellation no-events-at-return assertion and saving transport evidence"},
+      {"command": "same env uv run --extra http pytest -q tests/test_agent_surface.py::test_official_sdk_websocket_tools_and_host_payload_policy --basetemp=/tmp/browser-surface-websocket-proof", "result": "1 passed in4.68s; official SDK genuine websocket tool frames/opcode1+2/open101/filter/cursor plus host payload rejection and approved socket click"}
     ],
     "evidence": ["/tmp/browser-surface-progress-final/test_official_sdk_incremental_0/stdio-progress-evidence.json", "/tmp/browser-surface-progress-final/test_official_sdk_incremental_1/2026-07-28-progress-evidence.json", "/tmp/browser-surface-progress-final/test_official_sdk_incremental_2/legacy-progress-evidence.json", "/tmp/browser-surface-progress-final/test_official_sdk_incremental_1/2026-07-28-independent.png", "/tmp/browser-surface-proof/test_omp_extension_persistent_0/omp-progress-proof.json", "/tmp/browser-surface-proof/test_actual_omp_extension_load0/omp-proof.json"],
     "evidence_facts": "Official SDK stdio+modern+legacy HTTP receive numeric1,2,3 semantic progress BEFORE final. Cancelled run progress count remains1 at cancellation return and after500ms; session retained. Actual503 event captured. Visual provenance vision,calibrated=false via deterministic HTTP provider. Actual OMP loader and real extension persistent worker callback received3 updates with same request_id then final success; separate no-paid-model consumer.",
+    "websocket_surface_evidence": "/tmp/browser-surface-websocket-proof/test_official_sdk_websocket_to0/websocket-tool-evidence.json",
     "dependency_resolution": "uv lock completed; added Pillow12.3.0",
     "remaining": "Parent coordinated global suite/build; GitOwner repair/evidence commit"
   },
