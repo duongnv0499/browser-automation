@@ -506,3 +506,37 @@ async def test_repeated_same_observation_progress_is_debounced():
     assert all(a["seq"] < b["seq"] for a, b in zip(events, events[1:]))
     assert result["status"] in {"no_progress", "step_limit"}
 
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_checkpoint", ["observe", "done"])
+async def test_progress_delivery_failure_returns_result_without_repeating_callback(fail_checkpoint):
+    events = []
+
+    async def fail(event):
+        events.append(event)
+        if event["checkpoint"] == fail_checkpoint:
+            raise RuntimeError("private callback secret must not leak")
+
+    session = Session()
+    result = await BrowserAgent(session, Provider(satisfied=True), on_progress=fail).run("t1", "Read ready page")
+    assert result["status"] == "progress_error"
+    assert result["error_diagnostic"]["code"] == "progress_delivery_failed"
+    assert sum(e["checkpoint"] == fail_checkpoint for e in events) == 1
+    assert "private callback secret" not in json.dumps(result)
+    assert session.calls == []
+
+
+@pytest.mark.asyncio
+async def test_browser_changed_region_diagnostic_survives_blocked_run():
+    from browser_automation.browser import StaleObservationError
+    session = Session()
+    session.failure = StaleObservationError("Target pixels changed; observe again before visual dispatch")
+    session.failure.diagnostic = {"code": "target_pixels_changed", "changed_region": {"x": 10, "y": 20, "width": 30, "height": 40}}
+    result = await BrowserAgent(session, Provider("click"), approval=lambda _: True, stale_limit=0).run("t1", "Submit")
+    assert result["status"] == "blocked" and len(session.calls) == 1
+    assert result["error_diagnostic"]["code"] == "stale_observation"
+    assert result["error_diagnostic"]["diagnostic"] == session.failure.diagnostic
+    assert result["error_diagnostic"]["recommended_next_action"] == "reobserve"
+    assert "Target pixels changed" in result["error_diagnostic"]["message"]
+

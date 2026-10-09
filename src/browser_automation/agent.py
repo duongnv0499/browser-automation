@@ -14,6 +14,10 @@ from typing import Callable
 from .providers import ProviderError, ProviderRefusal, action_candidates
 from .page_state import compose_page_state, recovery_policy_from_env, reload_approval_reason
 
+class _ProgressDeliveryError(RuntimeError):
+    """A failed host callback stops the run without exposing callback contents."""
+
+
 
 class BrowserAgent:
     def __init__(self, session, provider, max_steps: int = 50, *,
@@ -21,7 +25,7 @@ class BrowserAgent:
                  max_text: int = 12000, history_limit: int = 8,
                  no_progress_limit: int = 3, verification_threshold: float = 0.9,
                  stale_limit: int = 3, interpret_visual: bool = False,
-                 visual_summary: bool | None = None, on_progress: Callable | None = None,
+                 on_progress: Callable | None = None,
                  recovery_policy: dict | None = None):
         if max_steps < 1 or history_limit < 1 or no_progress_limit < 1 or stale_limit < 0 or max_text < 1:
             raise ValueError("Agent bounds must be positive")
@@ -31,7 +35,7 @@ class BrowserAgent:
         self.provider = provider
         self.max_steps = max_steps
         self.approval = approval
-        self.interpret_visual = interpret_visual if visual_summary is None else visual_summary
+        self.interpret_visual = interpret_visual
         self.screenshot = screenshot or self.interpret_visual
         self.on_progress = on_progress
         self.recovery_policy = copy.deepcopy(recovery_policy) if recovery_policy is not None else recovery_policy_from_env()
@@ -117,10 +121,20 @@ class BrowserAgent:
         progress_seq = 0
         last_event = None
         last_event_at = 0.0
+        progress_disabled = False
+        error_diagnostic = None
+
+        def browser_diagnostic(exc: Exception) -> dict:
+            from .browser import BrowserError
+            from .service import error_payload
+            if isinstance(exc, BrowserError):
+                return error_payload(exc)
+            return {"code": "browser_action_failed", "message": type(exc).__name__,
+                    "recommended_next_action": "reobserve_and_review_no_replay"}
 
         async def emit(checkpoint: str, page: dict | None = None, *, terminal_status: str | None = None) -> None:
-            nonlocal progress_seq, last_event, last_event_at
-            if self.on_progress is None:
+            nonlocal progress_seq, last_event, last_event_at, progress_disabled
+            if self.on_progress is None or progress_disabled:
                 return
             descriptor = (page or {}).get("page_state", {})
             # No page/model text, URL, screenshot, or typed action values cross this channel.
@@ -138,9 +152,16 @@ class BrowserAgent:
             last_event, last_event_at = signature, now
             event = {"seq": progress_seq, "checkpoint": checkpoint, "step": len(steps),
                      "status": terminal_status or "running", "page_state": semantic}
-            callback_result = self.on_progress(event)
-            if inspect.isawaitable(callback_result):
-                await callback_result
+            try:
+                callback_result = self.on_progress(event)
+                if inspect.isawaitable(callback_result):
+                    await callback_result
+            except asyncio.CancelledError:
+                progress_disabled = True
+                raise
+            except Exception:
+                progress_disabled = True
+                raise _ProgressDeliveryError("Progress callback failed; run stopped without further input") from None
         def evidence_metadata(page: dict) -> None:
             page["verification_evidence"] = {"retained_offsets": list(text_offsets),
                 "retained_chars": sum(text_offsets.values()), "continuation_budget_chars": evidence_budget,
@@ -287,6 +308,7 @@ class BrowserAgent:
                         observation = await observe()
                         continue
                     status, error = "blocked", "Browser action failed; not replayed: " + type(exc).__name__
+                    error_diagnostic = browser_diagnostic(exc)
                     break
                 metrics["browser_ms"] += (time.perf_counter() - begin) * 1000
                 stale_count = 0
@@ -307,20 +329,34 @@ class BrowserAgent:
                 observation = await observe()
         except asyncio.CancelledError:
             status = "cancelled"
+        except _ProgressDeliveryError:
+            status, error = "progress_error", "Progress callback failed; run stopped without further input"
+            error_diagnostic = {"code": "progress_delivery_failed", "message": error,
+                                "recommended_next_action": "repair_progress_consumer_then_reobserve"}
         except ProviderRefusal:
             status, error = "refused", "Provider refused; no further actions executed"
         except ProviderError as exc:
             status, error = "provider_error", str(exc)
         except Exception as exc:
             status, error = "blocked", "Execution stopped: " + type(exc).__name__
+            error_diagnostic = browser_diagnostic(exc)
         finally:
             self._running = False
         metrics["elapsed_ms"] = (time.perf_counter() - started) * 1000
-        await emit("cancelled" if status == "cancelled" else "needs_user" if status == "approval_required" else "blocked" if status in {"blocked", "no_progress", "refused", "provider_error", "verification_failed", "step_limit"} else "done", observation, terminal_status=status)
+        try:
+            await emit("cancelled" if status == "cancelled" else "needs_user" if status == "approval_required" else "blocked" if status in {"blocked", "no_progress", "refused", "provider_error", "verification_failed", "step_limit", "progress_error"} else "done", observation, terminal_status=status)
+        except _ProgressDeliveryError:
+            status, error = "progress_error", "Final progress delivery failed; no further input executed"
+            error_diagnostic = {"code": "progress_delivery_failed", "message": error,
+                                "recommended_next_action": "repair_progress_consumer_then_reobserve"}
+        except asyncio.CancelledError:
+            status = "cancelled"
         result = {"status": status, "steps": steps, "observation": observation,
                   "verification": verification, "metrics": metrics, "active_tab": tab_id}
         if pending is not None:
             result["approval"] = pending
         if error is not None:
             result["error"] = error
+        if error_diagnostic is not None:
+            result["error_diagnostic"] = error_diagnostic
         return result

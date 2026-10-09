@@ -1,1 +1,53 @@
-{"owner":"DecisionState","phase":"READY","owned_paths":["src/browser_automation/agent.py","src/browser_automation/providers.py","src/browser_automation/page_state.py","tests/test_agent.py","tests/test_providers.py","tests/test_page_state.py","agents/decision-state.json"],"milestone":"2569461 source/state feature committed and pushed by ReleaseDocs","research":[{"url":"https://openrouter.ai/docs/guides/overview/multimodal/image-understanding.md","accessed":"2026-10-09","schema":"Chat completions messages content text then image_url with PNG data URL; structured output via existing text helper","limitations":"Live paid provider unavailable. OpenAI docs fetch HTTP403. No OCR accuracy or desktop monitoring claim."}],"contracts":{"state":"describe_dom and compose_page_state preserve DOM vs vision attribution; heuristic confidence not calibrated","recovery":"reload separate from custom Refresh; host BROWSER_RECOVERY_POLICY canonical origins, complete DOM error coverage and no sensitive/nonempty data","agent_options":"interpret_visual=false; visual_summary optional alias; on_progress callable; recovery_policy host-only dict","visual_result":"source vision, state, summary, visible_text <=8x240, observed regions <=8, recovery_recommended, self_reported_confidence uncalibrated, observation_id, capture_scope","progress":"seq increasing, checkpoint observe/needs_user/reobserve/blocked/done/cancelled, step executed action count, status, page_state structural state/source/coverage_status/recovery_available/approval_required/capture_scope; no typed secrets/raw text/screenshots; identical checkpoints debounced 250ms"},"tests_prepared":["classification/provenance","host recovery origin and unsaved/sensitive/partial guards","arbitrary visual text unprimed recording HTTP","actual Chromium canvas screenshot local deterministic HTTP visual fixture with no preapproval action","async progress ordering/debounce/cancellation"],"verification":"Not run: coordinated gate required; parent should run tests/test_agent.py tests/test_providers.py tests/test_page_state.py plus Surface actual MCP/HTTP progress/vision consumer smokes"}
+{
+  "owner": "DecisionState",
+  "phase": "PASS",
+  "owned_paths": [
+    "src/browser_automation/agent.py",
+    "src/browser_automation/providers.py",
+    "src/browser_automation/page_state.py",
+    "tests/test_agent.py",
+    "tests/test_providers.py",
+    "tests/test_page_state.py",
+    "agents/decision-state.json"
+  ],
+  "milestones": [
+    "2569461 source feature",
+    "8607064 regressions",
+    "c66d246 noninteractive alert repair"
+  ],
+  "research": [
+    {
+      "url": "https://openrouter.ai/docs/guides/overview/multimodal/image-understanding.md",
+      "accessed": "2026-10-09",
+      "schema": "Chat completions messages content text then image_url with PNG data URL; structured output via existing text helper",
+      "limitations": "Live paid provider unavailable. OpenAI docs fetch HTTP403. No OCR accuracy or desktop monitoring claim."
+    }
+  ],
+  "contracts": {
+    "state": "describe_dom and compose_page_state preserve DOM vs vision attribution and noninteractive collector visible_alerts frame/bounds metadata; heuristic confidence not calibrated",
+    "recovery": "reload separate from custom Refresh; host BROWSER_RECOVERY_POLICY canonical origins, complete DOM error coverage and no sensitive/nonempty data incl BrowserCore all-document safety",
+    "agent_options": "interpret_visual=false; on_progress callable; recovery_policy host-only dict. No visual_summary flag synonym; visual_summary is result dict only",
+    "visual_result": "source vision, state, summary, visible_text <=8x240, observed regions <=8, recovery_recommended, self_reported_confidence uncalibrated, observation_id, capture_scope",
+    "progress": "seq increasing, checkpoint observe/needs_user/reobserve/blocked/done/cancelled, step executed action count, status, page_state structural state/source/coverage_status/recovery_available/approval_required/capture_scope; no typed secrets/raw text/screenshots; identical checkpoints debounced 250ms",
+    "progress_errors": "Callback failure disables further callbacks, stops input and returns progress_error plus error_diagnostic; terminal delivery failures also return result without throwing/repeating",
+    "browser_errors": "BrowserError serialized lazily by existing error_payload in error_diagnostic preserving actual changed-region/reobserve info; unexpected errors retain sanitized type only"
+  },
+  "tests_prepared": [
+    "classification/provenance",
+    "host recovery origin and unsaved/sensitive/partial guards",
+    "arbitrary visual text unprimed recording HTTP",
+    "actual Chromium canvas screenshot local deterministic HTTP visual fixture with no preapproval action",
+    "async progress ordering/debounce/cancellation",
+    "progress callback initial/final failure with no repeated callback or secret disclosure",
+    "changed-region diagnostic retained after blocked action"
+  ],
+  "verification": {
+    "command": "BROWSER_AGENT_LIBRARY_PATH=/home/claw/.local/lib/chromium/usr/lib/x86_64-linux-gnu uv run pytest tests/test_agent.py tests/test_providers.py tests/test_page_state.py -q",
+    "result": "53 passed in 10.33s",
+    "scope": "Owned tests including actual Chromium canvas and browser agent local HTTP consumer fixtures; deterministic provider not live OCR",
+    "evidence": [
+      "/tmp/pytest-of-claw/pytest-1746/test_real_viewport_local_http_0/visual-evidence.json",
+      "/tmp/pytest-of-claw/pytest-1746/test_real_viewport_local_http_0/deterministic-viewport-visual.png"
+    ]
+  }
+}
