@@ -42,10 +42,18 @@ def describe_dom(observation: dict) -> dict:
     # This is evidence classification, not OCR or permission from page content.
     evidence = []
     alerts = []
+    for alert in observation.get("visible_alerts", [])[:8]:
+        if isinstance(alert, dict) and isinstance(alert.get("text"), str) and alert["text"].strip():
+            item = {"text": alert["text"][:240], "role": alert.get("role", "alert"), "source": "dom"}
+            for key in ("target", "frame_id", "bounds"):
+                if key in alert:
+                    item[key] = alert[key]
+            alerts.append(item)
     for e in elements:
         if e.get("role") in {"alert", "status"} and e.get("name"):
             alerts.append({"target": e.get("id"), "text": str(e["name"])[:240], "source": "dom"})
-    haystack = (text + "\n" + "\n".join(str(e.get("name", ""))[:240] for e in elements)).lower()
+    haystack = (text + "\n" + "\n".join(str(e.get("name", ""))[:240] for e in elements)
+                + "\n" + "\n".join(a["text"] for a in alerts)).lower()
     patterns = [("captcha", r"\bcaptcha\b|verify (?:that )?you are human|human verification"),
                 ("error", r"something went wrong|failed to load|unable to load|an error occurred|service unavailable|page (?:isn't|is not) working"),
                 ("login", r"sign in to continue|log in to continue|authentication required"),

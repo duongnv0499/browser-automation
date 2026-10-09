@@ -137,3 +137,15 @@ async def test_real_viewport_local_http_visual_recovery_consumer(tmp_path):
         server.server_close()
         thread.join()
 
+
+
+def test_noninteractive_collected_alerts_have_dom_provenance():
+    observation = page("", visible_alerts=[{"role": "alert", "text": "Something went wrong", "frame_id": "frame-safe",
+        "bounds": {"x": 10, "y": 10, "width": 200, "height": 30}}])
+    result = describe_dom(observation)
+    assert result["state"] == "error"
+    assert result["visible_alerts"][0]["source"] == "dom"
+    assert result["visible_alerts"][0]["frame_id"] == "frame-safe"
+    assert result["visible_alerts"][0]["bounds"] == observation["visible_alerts"][0]["bounds"]
+    assert observation["elements"] == []  # alert is not manufactured into an action target
+
