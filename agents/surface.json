@@ -1,6 +1,7 @@
 {
   "owner": "Surface",
-  "phase": "implementing consumer regressions; verification not authorized",
+  "phase": "Scoped verification PASS after authorized fixture repair; awaiting GitOwner evidence commit/global checks",
+  "feature_commit": "315271c pushed origin/main by ReleaseDocs; later consumer visual/cancellation acceptance additions pending evidence commit",
   "owned_paths": ["src/browser_automation/service.py", "src/browser_automation/mcp.py", "src/browser_automation/mcp_http.py", "src/browser_automation/cli.py", "integrations/omp/browser-tools.mjs", "pyproject.toml", "uv.lock", ".env.example", "tests/test_service.py", "tests/test_service_stdio.py", "tests/test_service_omp.py", "tests/test_mcp_http.py", "tests/test_mcp_http_browser.py", "tests/test_agent_surface.py", "agents/surface.json"],
   "contracts": {
     "navigation": "new_tab and reload expose wait_until commit/domcontentloaded/load/networkidle and timeout_ms 1..120000",
@@ -12,8 +13,21 @@
   "research": [
     {"url": "https://py.sdk.modelcontextprotocol.io/handlers/progress/index.md", "access_date": "2026-10-09", "fact": "async per-call progress_callback(progress,total,message); no total for unknown work; request metadata opt-in"},
     {"url": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/docs/extensions.md", "access_date": "2026-10-09", "fact": "registered tool execute(_toolCallId,params,_signal,_onUpdate,_ctx)"},
-    {"path": ".venv/lib/python3.13/site-packages/mcp/server/session.py", "fact": "SDK 2.3 public lowlevel request ctx.session.report_progress(progress,total=None,message=None); no-op without caller progress token"}
+    {"path": ".venv/lib/python3.13/site-packages/mcp/server/session.py", "fact": "SDK 2.3 public lowlevel request ctx.session.report_progress(progress,total=None,message=None); no-op without caller progress token"},
+    {"url": "https://py.sdk.modelcontextprotocol.io/handlers/cancellation/index.md", "access_date": "2026-10-09", "fact": "Cancelled task cancels server handler on stdio/modern+legacy streaming HTTP; await cleanup requires bounded AnyIO shield. Service provider cleanup now uses move_on_after(5,shield=True)."}
   ],
-  "verification": {"executed": [], "dependency_resolution": "uv lock completed; added Pillow12.3.0", "required": "parent coordinated unit/global suite and opt-in official SDK stdio modern/legacy HTTP browser progress consumers; CLI cancellation; actual OMP loader/persistent update parser"},
+  "verification": {
+    "authorized_by": "Main after all runtime workers READY and source review repairs",
+    "executed": [
+      {"command": "uv run --extra http pytest -q tests/test_service.py tests/test_mcp_http.py tests/test_agent_surface.py", "result": "29 passed,3 skipped in4.46s"},
+      {"command": "BROWSER_INTEGRATION_TESTS=1 BROWSER_AGENT_LIBRARY_PATH=/home/claw/.local/lib/chromium/usr/lib/x86_64-linux-gnu uv run --extra http pytest -q tests/test_agent_surface.py tests/test_service_stdio.py tests/test_service_omp.py tests/test_mcp_http_browser.py --basetemp=/tmp/browser-surface-proof", "result": "21 passed,3 failed in100.59s; fixture button click correctly paused for approval, so network request never executed. Repaired fixture to explicit safe link and assert act is not approval_required; no policy bypass."},
+      {"command": "same env uv run --extra http pytest -q tests/test_agent_surface.py --basetemp=/tmp/browser-surface-progress-proof", "result": "8 passed in23.71s after fixture repair; includes real host-policy reload allowed and sensitive reload exact host token approval"},
+      {"command": "same env uv run --extra http pytest -q tests/test_agent_surface.py --basetemp=/tmp/browser-surface-progress-final", "result": "8 passed in21.13s after strengthening cancellation no-events-at-return assertion and saving transport evidence"}
+    ],
+    "evidence": ["/tmp/browser-surface-progress-final/test_official_sdk_incremental_0/stdio-progress-evidence.json", "/tmp/browser-surface-progress-final/test_official_sdk_incremental_1/2026-07-28-progress-evidence.json", "/tmp/browser-surface-progress-final/test_official_sdk_incremental_2/legacy-progress-evidence.json", "/tmp/browser-surface-progress-final/test_official_sdk_incremental_1/2026-07-28-independent.png", "/tmp/browser-surface-proof/test_omp_extension_persistent_0/omp-progress-proof.json", "/tmp/browser-surface-proof/test_actual_omp_extension_load0/omp-proof.json"],
+    "evidence_facts": "Official SDK stdio+modern+legacy HTTP receive numeric1,2,3 semantic progress BEFORE final. Cancelled run progress count remains1 at cancellation return and after500ms; session retained. Actual503 event captured. Visual provenance vision,calibrated=false via deterministic HTTP provider. Actual OMP loader and real extension persistent worker callback received3 updates with same request_id then final success; separate no-paid-model consumer.",
+    "dependency_resolution": "uv lock completed; added Pillow12.3.0",
+    "remaining": "Parent coordinated global suite/build; GitOwner repair/evidence commit"
+  },
   "limitations": ["No live paid provider keys or native user profiles available; deterministic HTTP provider explicitly labeled not live inference quality", "Preserve doc.md and issues files unchanged"]
 }

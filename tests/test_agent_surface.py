@@ -21,6 +21,23 @@ def test_bounded_surface_contracts():
         with pytest.raises(ServiceError) as failure:
             validate_arguments(command, args)
         assert failure.value.code == "invalid_argument"
+    secret = "PRIVATE_TYPED_SECRET_123"
+    with pytest.raises(ServiceError) as failure:
+        validate_arguments("act", {"session_id": "s", "tab_id": "t", "action": {"observation_id": "r", "operation": "fill", "text": secret, "timeout_ms": secret}})
+    assert secret not in str(failure.value)
+
+
+@pytest.mark.asyncio
+async def test_reload_approval_binding_preserves_recovery_warning():
+    from test_service import service_with_session
+    service, session = service_with_session()
+    observed = await service.dispatch("observe", {"session_id": "s", "tab_id": "t"})
+    paused = await service.dispatch("act", {"session_id": "s", "tab_id": "t", "action": {"observation_id": observed["id"], "operation": "reload"}})
+    binding = paused["binding"]
+    assert binding["recovery"] == observed["page_state"]["recovery_candidates"]
+    assert binding["data_loss_warning"] and binding["expected_rendered_result"] and binding["provenance"] == "dom"
+    assert service.pending_actions[("s", "t", observed["id"])]["binding"] == binding
+    await service.close()
 
 
 @pytest.mark.asyncio
@@ -76,10 +93,22 @@ async def deterministic_fixture():
                 await asyncio.sleep(0.3)
                 body = json.dumps({"answers": {name: {"type": "choice", "choice": choice, "confidence": 1.0, "probabilities": {key: float(key == choice) for key in choices}}}}).encode()
                 mime = b"application/json"
+            elif path == "/visual":
+                length = next(int(line.split(":", 1)[1]) for line in headers.split("\r\n") if line.lower().startswith("content-length:"))
+                request = json.loads(await reader.readexactly(length))
+                content = request["messages"][-1]["content"]
+                assert any(part.get("type") == "image_url" for part in content)
+                assert "Visible READY" not in json.dumps(content), "Do not prime expected visual readback"
+                summary = {"state": "ready", "summary": "Deterministic fixture viewport description", "visible_text": ["Visible READY"], "region_targets": [], "recovery_recommended": False, "self_reported_confidence": 0.8, "refusal": False}
+                body = json.dumps({"choices": [{"finish_reason": "stop", "message": {"content": json.dumps(summary)}}]}).encode()
+                mime = b"application/json"
             elif path == "/unavailable":
                 body, mime = b"Unavailable", b"text/plain"
+            elif path in {"/error", "/sensitive"}:
+                field = b'<label>Draft <input value="private unsaved draft"></label>' if path == "/sensitive" else b""
+                body, mime = b'<!doctype html><h1>Something went wrong</h1>' + field, b"text/html"
             else:
-                body = b'<!doctype html><title>Agent-native proof</title><h1>Visible READY</h1><button onclick="fetch(\'/unavailable\')">Fetch status</button>'
+                body = b'<!doctype html><title>Agent-native proof</title><h1>Visible READY</h1><a href="#status" onclick="fetch(\'/unavailable\')">Fetch status</a>'
                 mime = b"text/html"
             status = b"503 Service Unavailable" if path == "/unavailable" else b"200 OK"
             writer.write(b"HTTP/1.1 " + status + b"\r\nContent-Type: " + mime + b"\r\nContent-Length: " + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body)
@@ -101,7 +130,8 @@ async def test_official_sdk_incremental_progress_real_browser(transport, monkeyp
     async with deterministic_fixture() as origin:
         monkeypatch.setenv("OPENROUTER_API_KEY", "local-deterministic-fixture-not-live")
         monkeypatch.setenv("BROWSER_AGENT_DECISIONS_ENDPOINT", origin + "/decisions")
-        monkeypatch.setenv("BROWSER_AGENT_VISION", "false")
+        monkeypatch.setenv("BROWSER_AGENT_VISION", "true")
+        monkeypatch.setenv("BROWSER_AGENT_TEXT_ENDPOINT", origin + "/visual")
         @asynccontextmanager
         async def connection():
             if transport == "stdio":
@@ -119,6 +149,8 @@ async def test_official_sdk_incremental_progress_real_browser(transport, monkeyp
             sid = opened["session_id"]
             created = await call("new_tab", {"session_id": sid, "url": origin, "wait_until": "domcontentloaded", "timeout_ms": 3000})
             args = {"session_id": sid, "tab_id": created["tab"]["id"]}
+            invalid = await client.call_tool("act", {**args, "action": {"observation_id": "unused", "operation": "fill", "text": "PRIVATE_TYPED_SECRET_123", "timeout_ms": "PRIVATE_TYPED_SECRET_123"}})
+            assert invalid.is_error and "PRIVATE_TYPED_SECRET_123" not in json.dumps(invalid.model_dump(by_alias=True))
             observed = await client.call_tool("observe", {**args, "screenshot": True})
             assert not observed.is_error
             obs = observed.structured_content
@@ -127,7 +159,8 @@ async def test_official_sdk_incremental_progress_real_browser(transport, monkeyp
             (tmp_path / f"{transport}-independent.png").write_bytes(base64.b64decode(image))
             await call("network_start", {**args, "max_events": 16})
             target = next(e["id"] for e in obs["elements"] if e["name"] == "Fetch status")
-            await call("act", {**args, "action": {"observation_id": obs["id"], "operation": "click", "target": target}})
+            acted = await call("act", {**args, "action": {"observation_id": obs["id"], "operation": "click", "target": target}})
+            assert acted.get("status") != "approval_required", acted
             await asyncio.sleep(0.2)
             events = await call("network_list", args)
             assert any(event.get("status") == 503 for event in events["events"]), events
@@ -135,6 +168,9 @@ async def test_official_sdk_incremental_progress_real_browser(transport, monkeyp
             fresh = await call("observe", args)
             paused = await call("act", {**args, "action": {"observation_id": fresh["id"], "operation": "reload"}})
             assert paused["status"] == "approval_required"
+            visual = await call("observe", {**args, "interpret_visual": True})
+            assert visual["visual_summary"]["source"] == "vision" and visual["visual_summary"]["calibrated"] is False
+            assert visual["page_state"]["source"] == "dom+vision"
             received = asyncio.Event()
             progress = []
             async def update(value, total, message):
@@ -148,4 +184,55 @@ async def test_official_sdk_incremental_progress_real_browser(transport, monkeyp
             assert progress and all(b[0] > a[0] for a, b in zip(progress, progress[1:]))
             assert all(total is None for _, total, _ in progress)
             assert "screenshot" not in json.dumps(progress)
+            cancelled_progress = []
+            cancellation_started = asyncio.Event()
+            async def cancel_update(value, total, message):
+                cancelled_progress.append(value)
+                cancellation_started.set()
+            pending = asyncio.create_task(client.call_tool("run", {**args, "goal": "Read the visible READY heading", "max_steps": 3, "screenshot": False}, progress_callback=cancel_update))
+            await asyncio.wait_for(cancellation_started.wait(), 10)
+            pending.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await pending
+            settled = len(cancelled_progress)
+            await asyncio.sleep(0.5)
+            assert len(cancelled_progress) == settled
+            assert (await call("tabs", {"session_id": sid}))["tabs"]
+            evidence = {"transport": transport, "provider": "deterministic local HTTP fixture; not live inference", "progress_before_final": True, "progress": progress, "cancellation_progress_count_at_return": settled, "cancellation_progress_count_after_delay": len(cancelled_progress), "retained_session": sid, "network_events": events, "visual_source": visual["visual_summary"]["source"], "visual_calibrated": visual["visual_summary"]["calibrated"]}
+            (tmp_path / f"{transport}-progress-evidence.json").write_text(json.dumps(evidence, indent=2))
+            await call("close", {"session_id": sid})
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(os.environ.get("BROWSER_INTEGRATION_TESTS") != "1", reason="Coordinated real browser verification")
+async def test_real_browser_host_recovery_policy_and_sensitive_approval(monkeypatch, tmp_path):
+    from mcp import Client, StdioServerParameters
+    import time
+    async with deterministic_fixture() as origin:
+        approvals = tmp_path / "approvals.json"
+        approvals.write_text("[]")
+        env = {**os.environ, "BROWSER_RECOVERY_POLICY": json.dumps({"reload_without_approval_origins": [origin]}), "BROWSER_APPROVALS_FILE": str(approvals)}
+        async with Client(StdioServerParameters(command=sys.executable, args=["-m", "browser_automation.mcp"], env=env), mode="legacy") as client:
+            async def call(name, args):
+                result = await client.call_tool(name, args)
+                assert not result.is_error, result
+                return result.structured_content
+            opened = await call("launch", {"headless": True})
+            sid = opened["session_id"]
+            for path, needs_approval in [("/error", False), ("/sensitive", True)]:
+                created = await call("new_tab", {"session_id": sid, "url": origin + path})
+                args = {"session_id": sid, "tab_id": created["tab"]["id"]}
+                obs = await call("observe", args)
+                assert obs["page_state"]["state"] == "error" and obs["coverage"]["status"] == "complete"
+                result = await call("act", {**args, "action": {"observation_id": obs["id"], "operation": "reload", "wait_until": "domcontentloaded", "timeout_ms": 3000}})
+                assert (result.get("status") == "approval_required") is needs_approval
+                if needs_approval:
+                    binding = result["binding"]
+                    assert binding["data_loss_warning"] and binding["recovery"][0]["approval_required"]
+                    approvals.write_text(json.dumps([{"token": "explicit-local-host-approval", "binding": binding, "expires_at": time.time() + 60}]))
+                    result = await call("approved_act", {**args, "observation_id": obs["id"], "approval_token": "explicit-local-host-approval"})
+                assert result.get("navigation_status") == "complete", result
+                fresh = await call("observe", args)
+                assert "Something went wrong" in fresh["text"]
+                await call("close_tab", args)
             await call("close", {"session_id": sid})

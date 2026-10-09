@@ -184,7 +184,6 @@ def create_app(*, credentials=None, host="127.0.0.1", port=8767, allow_hosts=(),
                max_sessions=64, session_idle_timeout=1800, max_request_body_size=1048576,
                max_browser_sessions=8):
     """Build one single-process ASGI app; HTTP dependencies are optional."""
-    from jsonschema import Draft202012Validator
     from mcp.server import Server
     from mcp.server.transport_security import TransportSecuritySettings
     from mcp.types import CallToolResult, ListToolsResult, Tool
@@ -209,7 +208,7 @@ def create_app(*, credentials=None, host="127.0.0.1", port=8767, allow_hosts=(),
     # SDK bounds legacy protocol sessions; configured identities bound modern
     # persistent scopes. Reserve room for both without coupling SDK internals.
     registry = ServiceRegistry(max_sessions + len(credentials), session_idle_timeout)
-    schemas = {name: Draft202012Validator(spec) for name, _, spec in TOOLS}
+    tool_names = {name for name, _, _ in TOOLS}
 
     async def list_tools(ctx, params):
         return ListToolsResult(tools=[Tool(name=name, description=desc, input_schema=spec) for name, desc, spec in TOOLS])
@@ -223,10 +222,9 @@ def create_app(*, credentials=None, host="127.0.0.1", port=8767, allow_hosts=(),
                 progress += 1
                 await ctx.session.report_progress(progress, message=json.dumps(event, ensure_ascii=False, separators=(",", ":")))
         try:
-            if params.name not in schemas:
+            if params.name not in tool_names:
                 raise ServiceError("unknown_tool", "Unknown tool")
             args = params.arguments or {}
-            schemas[params.name].validate(args)
             principal = ctx.request.scope["browser_principal"]
             sid = ctx.request.headers.get("mcp-session-id")
             entry = await registry.acquire(principal, sid)

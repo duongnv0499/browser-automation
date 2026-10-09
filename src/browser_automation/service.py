@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import anyio
 import importlib.util
 import ipaddress
 import json
@@ -134,7 +135,8 @@ class BrowserService:
                         observation["visual_interpretation_error"] = error_payload(exc)
                     finally:
                         if provider is not None:
-                            await provider.close()
+                            with anyio.move_on_after(5, shield=True):
+                                await provider.close()
                 observation["page_state"] = compose_page_state(observation, visual=visual, policy=self.recovery_policy)
                 full = dict(observation)
                 full.pop("screenshot", None)
@@ -163,6 +165,12 @@ class BrowserService:
                     import copy
                     binding = {"session_id": sid, "tab_id": args["tab_id"], "observation_id": action["observation_id"],
                                "action": copy.deepcopy(action), "reason": reason}
+                    if action["operation"] == "reload":
+                        from .page_state import WARNING
+                        binding["recovery"] = copy.deepcopy(snapshot.get("page_state", {}).get("recovery_candidates", []))
+                        binding["data_loss_warning"] = WARNING
+                        binding["expected_rendered_result"] = "A fresh document observation, potentially still showing the error."
+                        binding["provenance"] = snapshot.get("page_state", {}).get("source", "dom")
                     key = (sid, args["tab_id"], action["observation_id"])
                     expiry = time.time() + 300
                     self.pending_actions[key] = {"binding": binding, "expires_at": expiry}
@@ -226,7 +234,8 @@ class BrowserService:
                             "resume_tool": "approved_act"}
                     return result
                 finally:
-                    await provider.close()
+                    with anyio.move_on_after(5, shield=True):
+                        await provider.close()
             if command in {"network_start", "network_list", "network_stop", "websocket_start", "websocket_list", "websocket_stop"}:
                 kind, operation = command.split("_")
                 tab_id = args.pop("tab_id")

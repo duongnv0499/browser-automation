@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import sys
+from functools import lru_cache
 from .service import BrowserService, error_payload
 
 INSTRUCTIONS = (
@@ -75,15 +76,19 @@ for kind in ("network", "websocket"):
     ])
 
 
-def validate_arguments(command, arguments):
+@lru_cache(maxsize=1)
+def _argument_validators():
     from jsonschema import Draft202012Validator
+    return {name: Draft202012Validator(spec) for name, _, spec in TOOLS}
+
+
+def validate_arguments(command, arguments):
     from .service import ServiceError
-    spec = next((spec for name, _, spec in TOOLS if name == command), None)
-    if spec is None:
-        raise ServiceError("unknown_command", f"Unknown command: {command}")
-    errors = list(Draft202012Validator(spec).iter_errors(arguments))
-    if errors:
-        error = errors[0]
+    validator = _argument_validators().get(command)
+    if validator is None:
+        raise ServiceError("unknown_command", "Unknown command")
+    error = next(validator.iter_errors(arguments), None)
+    if error is not None:
         location = ".".join(str(part) for part in error.absolute_path) or "arguments"
         raise ServiceError("invalid_argument", f"Invalid {location}: expected {error.validator} constraint")
 
@@ -122,7 +127,7 @@ async def serve():
                     raise ValueError("Unknown tool")
                 try:
                     token = params.get("_meta", {}).get("progressToken")
-                    valid_token = isinstance(token, (str, int, float)) and not isinstance(token, bool)
+                    valid_token = isinstance(token, (str, int)) and not isinstance(token, bool)
                     progress = 0
                     async def report(event):
                         nonlocal progress
