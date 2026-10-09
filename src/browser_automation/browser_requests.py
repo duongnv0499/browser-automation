@@ -54,6 +54,7 @@ class Plan:
     tab_id: str
     context: Any
     page_url: str
+    document_generation: int
     url: str
     method: str
     headers: tuple[tuple[str, str], ...]
@@ -74,8 +75,10 @@ class RequestExecutor:
         self._record_limit = bounded_env('BROWSER_NETWORK_CALL_LIMIT', 256)
         self._plan_limit = bounded_env('BROWSER_NETWORK_PLAN_LIMIT', 256)
         self._bytes = 0
+        self._call_sequence = 0
+        self._call_evictions: dict[str, int] = {}
 
-    def prepare(self, tab_id: str, page: Any, spec: dict[str, Any], *, source: Any = None, source_context: Any = None) -> dict[str, Any]:
+    def prepare(self, tab_id: str, page: Any, spec: dict[str, Any], *, source: Any = None, source_context: Any = None, document_generation: int = 0) -> dict[str, Any]:
         allowed = {'url', 'method', 'headers', 'body', 'json_body', 'form', 'body_base64', 'params', 'timeout_ms', 'max_redirects'}
         unknown = set(spec) - allowed
         if unknown:
@@ -184,11 +187,12 @@ class RequestExecutor:
         binding['headers_preview'] = [{'name': header['name'][:128], 'value': header['value'][:512], 'truncated': len(header['name']) > 128 or len(header['value']) > 512} for header in filtered_headers[:32]]
         binding['headers_preview_truncated'] = len(filtered_headers) > 32
         binding['privacy_note'] = PRIVACY_NOTE
+        binding['document_generation'] = document_generation
         # Raw URL participates in the hash, never appears in a default model preview.
         digest = hashlib.sha256(json.dumps({**binding, 'raw_url': url, 'raw_page_url': page.url}, sort_keys=True).encode()).hexdigest()
         binding['plan_hash'] = digest
         preview = {'status': 'approval_required' if reasons else 'prepared', 'plan_id': plan_id, 'plan_hash': digest, 'binding': binding, 'expires_at': now + 300, 'approval_required': bool(reasons), 'approval_reason': '; '.join(reasons) or 'Same-origin HTTP safe method; servers can violate safe-method semantics', 'request': {'url': safe_url(url), 'method': method, 'headers': binding['headers_preview'], 'headers_truncated': binding['headers_preview_truncated'], 'body_bytes': len(body) if body is not None else 0}, 'limitations': ['API requests do not render the DOM', 'Duplicate original request headers collapsed to their last value'] if duplicates else ['API requests do not render the DOM']}
-        self._plans[plan_id] = Plan(plan_id, tab_id, page.context, page.url, url, method, tuple(headers.values()), body, timeout, redirects, now + 300, source_binding, json.dumps(preview))
+        self._plans[plan_id] = Plan(plan_id, tab_id, page.context, page.url, document_generation, url, method, tuple(headers.values()), body, timeout, redirects, now + 300, source_binding, json.dumps(preview))
         return preview
 
     def plan(self, plan_id: str) -> Plan:
@@ -210,9 +214,12 @@ class RequestExecutor:
         self._plans.pop(plan_id)  # Consume before first send; never retry an unknown outcome.
         request_id = 'call' + uuid.uuid4().hex
         record = {'request_id': request_id, 'tab_id': plan.tab_id, 'url': plan.url, 'method': plan.method, 'headers': [{'name': n, 'value': v} for n, v in plan.headers], 'body': plan.body, 'response': None, 'response_headers': [], 'response_body': None, 'unavailable_reason': None, 'provenance': 'browser_context_api_request', 'redirects': [], 'status': None}
+        self._call_sequence += 1
+        record.update(plan_id=plan_id, cursor=self._call_sequence)
         self._records[request_id] = record
         while len(self._records) > self._record_limit:
             _, old = self._records.popitem(last=False)
+            self._call_evictions[old['tab_id']] = self._call_evictions.get(old['tab_id'], 0) + 1
             await self._dispose(old)
         url, method, body = plan.url, plan.method, plan.body
         headers = dict(plan.headers)
@@ -264,10 +271,24 @@ class RequestExecutor:
             raise ValueError('Unknown, evicted, or wrong-tab API request')
         return record
 
+    def calls(self, tab_id: str, plan_id: str | None = None, cursor: int | None = None, limit: int = 100) -> dict[str, Any]:
+        if plan_id is not None and not isinstance(plan_id, str):
+            raise ValueError('plan_id must be a string')
+        if cursor is not None and (isinstance(cursor, bool) or not isinstance(cursor, int) or not 0 <= cursor <= self._call_sequence):
+            raise ValueError('cursor must be a nonnegative issued-call cursor not ahead of latest')
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
+            raise ValueError('limit must be an integer in 1..1000')
+        records = [record for record in self._records.values() if record['tab_id'] == tab_id and (plan_id is None or record['plan_id'] == plan_id) and record['cursor'] > (cursor or 0)]
+        selected = records[:limit]
+        requests = [{key: record[key] for key in ('request_id', 'plan_id', 'tab_id', 'cursor', 'method', 'status', 'unavailable_reason', 'provenance')} | {'url': safe_url(record['url']), 'diagnostic': record.get('diagnostic')} for record in selected]
+        evicted = self._call_evictions.get(tab_id, 0)
+        return {'tab_id': tab_id, 'calls': requests, 'next_cursor': selected[-1]['cursor'] if selected else self._call_sequence, 'latest_cursor': self._call_sequence, 'has_more': len(records) > limit, 'record_limit': self._record_limit, 'evicted_records': evicted, 'incomplete_history': evicted > 0, 'cursor_scope': 'session-issued-call sequence; inventory filtered to this tab', 'privacy_note': PRIVACY_NOTE}
+
     async def detail(self, tab_id: str, request_id: str, fields: list[str] | None = None, include_sensitive: bool = False) -> dict[str, Any]:
         sensitive_allowed(include_sensitive)
         record = self._record(tab_id, request_id)
         result = {'request_id': request_id, 'tab_id': tab_id, 'provenance': record['provenance'], 'url': safe_url(record['url'], include_sensitive), 'method': record['method'], 'request_headers': safe_headers(record['headers'], include_sensitive), 'status': record['status'], 'response_headers': safe_headers(record['response_headers'], include_sensitive), 'response_url': safe_url(record.get('response_url', record['url']), include_sensitive), 'redirects': record['redirects'], 'request_body_bytes': len(record['body']) if record['body'] is not None else 0, 'unavailable_reason': record['unavailable_reason'], 'redaction_best_effort': not include_sensitive}
+        result['plan_id'] = record['plan_id']
         result['query'] = [{'name': name, 'value': value} for name, value in parse_qsl(urlsplit(result['url']).query, keep_blank_values=True)]
         result['privacy_note'] = PRIVACY_NOTE
         if record.get('diagnostic'):

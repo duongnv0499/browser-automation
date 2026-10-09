@@ -208,6 +208,14 @@ async def test_cancelled_request_consumes_plan_without_retry():
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
+        inventory = await browser.network_calls(tab, plan_id=plan['plan_id'])
+        assert len(inventory['calls']) == 1
+        issued = inventory['calls'][0]
+        assert issued['unavailable_reason'] == 'cancelled_unknown_outcome'
+        detail = await browser.network_detail(tab, issued['request_id'])
+        assert detail['diagnostic']['code'] == 'cancelled_unknown_outcome'
+        body = await browser.network_body(tab, issued['request_id'])
+        assert body['unavailable_reason'] == 'cancelled_unknown_outcome'
         with pytest.raises(ValueError, match='consumed'):
             await browser.network_execute(plan['plan_id'], approved=True)
         assert sum(r['path'] == '/slow' for r in seen) == 1
@@ -330,3 +338,43 @@ async def test_bounded_sanitized_approval_preview_and_actual_wire_semantics(tmp_
         result = await browser.network_execute(plan['plan_id'], approved=True)
         assert json.loads(seen[-1]['body']) == payload
         (tmp_path / 'approval-preview-proof.json').write_text(json.dumps({'binding': binding, 'actual_response_status': result['status'], 'wire_payload_matches_approved_raw_spec': json.loads(seen[-1]['body']) == payload}, indent=2))
+
+
+@pytest.mark.asyncio
+async def test_same_url_reload_rejects_old_plan_before_send():
+    async with api_site() as (url, seen, _), await BrowserSession.launch(headless=True) as browser:
+        tab = (await browser.new_tab(url))['id']
+        plan = await browser.network_call(tab, url=url + '/echo', method='POST', body='old document')
+        old_url = browser._page(tab).url
+        await browser._page(tab).reload()
+        assert browser._page(tab).url == old_url
+        before = len(seen)
+        with pytest.raises(Exception, match='document generation changed'):
+            await browser.network_plan(plan['plan_id'])
+        with pytest.raises(Exception, match='document generation changed'):
+            await browser.network_execute(plan['plan_id'], approved=True)
+        assert len(seen) == before
+        fresh = await browser.network_call(tab, url=url + '/echo', method='POST', body='new document')
+        assert fresh['binding']['document_generation'] != plan['binding']['document_generation']
+        await browser.network_execute(fresh['plan_id'], approved=True)
+        assert seen[-1]['body'] == 'new document'
+
+
+@pytest.mark.asyncio
+async def test_issued_inventory_cursor_eviction_and_tab_scope(monkeypatch):
+    monkeypatch.setenv('BROWSER_NETWORK_CALL_LIMIT', '2')
+    async with api_site() as (url, _, _), await BrowserSession.launch(headless=True) as browser:
+        tab = (await browser.new_tab(url))['id']
+        other = (await browser.new_tab(url))['id']
+        plans = []
+        for _ in range(3):
+            plan = await browser.network_call(tab, url=url + '/echo')
+            plans.append(plan['plan_id'])
+            await browser.network_execute(plan['plan_id'], approved=True)
+        first = await browser.network_calls(tab, limit=1)
+        assert first['has_more'] and first['evicted_records'] == 1
+        assert first['incomplete_history']
+        second = await browser.network_calls(tab, cursor=first['next_cursor'])
+        assert len(second['calls']) == 1 and second['calls'][0]['plan_id'] == plans[-1]
+        assert not (await browser.network_calls(tab, plan_id=plans[0]))['calls']
+        assert not (await browser.network_calls(other))['calls']

@@ -121,6 +121,10 @@ class BrowserSession:
         self._network_future_options: dict[str, Any] | None = None
         self._network_tasks: set[asyncio.Task] = set()
         self._network_future_failures: deque[dict[str, str]] = deque(maxlen=64)
+        self._document_generations: dict[Any, int] = {}
+        self._network_generation = 0
+        self._network_suppressed: set[str] = set()
+        self._network_page_tasks: dict[str, set[asyncio.Task]] = {}
 
     @staticmethod
     def _allowed_url(url: str, *, subframe: bool = False) -> bool:
@@ -308,6 +312,11 @@ class BrowserSession:
             await pw.stop()
             raise
 
+    def _frame_navigated(self, page: Any, frame: Any) -> None:
+        self._local_frames.discard(frame)
+        if frame == page.main_frame:
+            self._document_generations[page] = self._document_generations.get(page, 0) + 1
+
     def _sync_pages(self) -> None:
         if self._closed:
             raise BrowserError('Session is closed')
@@ -317,8 +326,9 @@ class BrowserSession:
                     tab = uuid.uuid4().hex
                     self._ids[page] = tab
                     self._pages[tab] = page
+                    self._document_generations[page] = 0
                     listeners = [('popup', lambda popup, opener=page: self._owned.add(popup) if opener in self._owned else None),
-                                 ('framenavigated', lambda frame: self._local_frames.discard(frame))]
+                                 ('framenavigated', lambda frame, owner=page: self._frame_navigated(owner, frame))]
                     self._page_listeners[page] = listeners
                     for event, callback in listeners:
                         page.on(event, callback)
@@ -326,6 +336,7 @@ class BrowserSession:
             if page.is_closed():
                 self._pages.pop(tab)
                 self._ids.pop(page, None)
+                self._document_generations.pop(page, None)
                 self._owned.discard(page)
                 for event, callback in self._page_listeners.pop(page, []):
                     page.remove_listener(event, callback)
@@ -396,6 +407,8 @@ class BrowserSession:
             page = self._page(tab_id,allow_protected=True)
             if self._attached and page not in self._owned:
                 raise UnsafeActionError('Cannot close a preexisting user tab')
+            self._network_suppressed.add(tab_id)
+            await self._network_cancel_pending(tab_id)
             for kind in ('network', 'websocket'):
                 await self._monitor.stop(tab_id, kind)
             self._invalidate(tab_id)
@@ -405,6 +418,8 @@ class BrowserSession:
 
     async def monitor_start(self, tab_id: str, kind: str, **options: Any) -> dict[str, Any]:
         async with self._lock:
+            if kind == 'network':
+                self._network_suppressed.discard(tab_id)
             return await self._monitor.start(self._page(tab_id), tab_id, kind, **options)
 
     async def monitor_list(self, tab_id: str, kind: str, cursor: int | None = None, limit: int = 100) -> dict[str, Any]:
@@ -414,6 +429,9 @@ class BrowserSession:
 
     async def monitor_stop(self, tab_id: str, kind: str) -> dict[str, Any]:
         async with self._lock:
+            if kind == 'network':
+                self._network_suppressed.add(tab_id)
+                await self._network_cancel_pending(tab_id)
             return await self._monitor.stop(tab_id, kind)
 
     async def network_detail(self, tab_id: str, request_id: str, fields: list[str] | None = None, include_sensitive: bool = False) -> dict[str, Any]:
@@ -432,14 +450,16 @@ class BrowserSession:
 
     async def network_call(self, tab_id: str, **spec: Any) -> dict[str, Any]:
         async with self._lock:
-            return self._requests.prepare(tab_id, self._page(tab_id), spec)
+            page = self._page(tab_id)
+            return self._requests.prepare(tab_id, page, spec, document_generation=self._document_generations[page])
 
     async def network_replay(self, tab_id: str, request_id: str, target_tab_id: str | None = None, **overrides: Any) -> dict[str, Any]:
         async with self._lock:
             source_page = self._page(tab_id)
             source = await self._monitor.replay_source(tab_id, request_id)
             target = target_tab_id or tab_id
-            return self._requests.prepare(target, self._page(target), overrides, source=source, source_context=source_page.context)
+            page = self._page(target)
+            return self._requests.prepare(target, page, overrides, source=source, source_context=source_page.context, document_generation=self._document_generations[page])
 
     async def _network_plan(self, plan_id: str) -> dict[str, Any]:
         plan = self._requests.plan(plan_id)
@@ -448,6 +468,8 @@ class BrowserSession:
             raise UnsafeActionError('Network plan browser context changed')
         if page.url != plan.page_url:
             raise UnsafeActionError('Network plan target document URL changed')
+        if self._document_generations[page] != plan.document_generation:
+            raise UnsafeActionError('Network plan target document generation changed')
         if plan.source:
             tab, request, capture = plan.source
             self._page(tab)
@@ -465,21 +487,47 @@ class BrowserSession:
             await self._network_plan(plan_id)
             return await self._requests.execute(plan_id, approved=approved)
 
-    def _network_new_page(self, page: Any) -> None:
-        if self._closed or self._network_future_options is None:
+    async def network_calls(self, tab_id: str, plan_id: str | None = None, cursor: int | None = None, limit: int = 100) -> dict[str, Any]:
+        async with self._lock:
+            self._page(tab_id)
+            return self._requests.calls(tab_id, plan_id=plan_id, cursor=cursor, limit=limit)
+
+    def _network_new_page(self, page: Any, generation: int) -> None:
+        if self._closed or self._network_future_options is None or generation != self._network_generation:
             return
         self._sync_pages()
         tab_id = self._ids[page]
+        if tab_id in self._network_suppressed:
+            return
         options = dict(self._network_future_options)
         async def capture() -> None:
             try:
+                if generation != self._network_generation or tab_id in self._network_suppressed:
+                    return
                 self._ensure_safe(page)
                 await self._monitor.start(page, tab_id, 'network', **options)
+                if generation != self._network_generation or tab_id in self._network_suppressed:
+                    await self._monitor.stop(tab_id, 'network')
             except Exception as exc:
                 self._network_future_failures.append({'tab_id': tab_id, 'error_type': type(exc).__name__})
         task = asyncio.create_task(capture())
         self._network_tasks.add(task)
-        task.add_done_callback(self._network_tasks.discard)
+        self._network_page_tasks.setdefault(tab_id, set()).add(task)
+        def completed(done: asyncio.Task) -> None:
+            self._network_tasks.discard(done)
+            tasks = self._network_page_tasks.get(tab_id)
+            if tasks is not None:
+                tasks.discard(done)
+                if not tasks:
+                    self._network_page_tasks.pop(tab_id, None)
+        task.add_done_callback(completed)
+
+    async def _network_cancel_pending(self, tab_id: str) -> None:
+        tasks = tuple(self._network_page_tasks.get(tab_id, ()))
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
 
     async def network_start_many(self, tab_ids: list[str] | None = None, include_new_tabs: bool = False, **options: Any) -> dict[str, Any]:
         async with self._lock:
@@ -489,22 +537,33 @@ class BrowserSession:
             if tab_ids is not None and (not isinstance(tab_ids, list) or any(not isinstance(tab, str) for tab in tab_ids)):
                 raise ValueError('tab_ids must be a list of tab IDs')
             selected = list(self._pages) if tab_ids is None else list(dict.fromkeys(tab_ids))
-            captures, failures = [], []
-            for tab in selected:
-                try:
-                    captures.append(await self._monitor.start(self._page(tab), tab, 'network', **options))
-                except Exception as exc:
-                    failures.append({'tab_id': tab, 'error_type': type(exc).__name__})
             if include_new_tabs:
+                old_tasks = tuple(self._network_tasks)
+                self._network_generation += 1
+                generation = self._network_generation
                 self._network_future_options = dict(options)
+                for context, callback in self._network_context_listeners.items():
+                    context.remove_listener('page', callback)
+                self._network_context_listeners.clear()
                 contexts = {self._pages[tab].context for tab in selected if tab in self._pages}
                 if tab_ids is None:
                     contexts.update(self._browser.contexts)
                 for context in contexts:
-                    if context not in self._network_context_listeners:
-                        callback = self._network_new_page
-                        context.on('page', callback)
-                        self._network_context_listeners[context] = callback
+                    callback = lambda page, owner=generation: self._network_new_page(page, owner)
+                    context.on('page', callback)
+                    self._network_context_listeners[context] = callback
+                # Hooks are registered before the first await: popups opened
+                # while existing pages are being attached are in scope too.
+                for task in old_tasks:
+                    task.cancel()
+                await asyncio.gather(*old_tasks, return_exceptions=True)
+            captures, failures = [], []
+            for tab in selected:
+                self._network_suppressed.discard(tab)
+                try:
+                    captures.append(await self._monitor.start(self._page(tab), tab, 'network', **options))
+                except Exception as exc:
+                    failures.append({'tab_id': tab, 'error_type': type(exc).__name__})
             return {'captures': captures, 'failures': failures, 'include_new_tabs': self._network_future_options is not None, 'initial_request_race': 'Future page listeners attach at page notification; requests before attachment are not captured'}
 
     async def network_list_many(self, tab_ids: list[str] | None = None, cursors: dict[str, int] | None = None, limit: int = 100) -> dict[str, Any]:
@@ -531,6 +590,7 @@ class BrowserSession:
                 raise ValueError('tab_ids must be a list of tab IDs')
             if tab_ids is None:
                 self._network_future_options = None
+                self._network_generation += 1
                 for context, callback in self._network_context_listeners.items():
                     context.remove_listener('page', callback)
                 self._network_context_listeners.clear()
@@ -538,6 +598,9 @@ class BrowserSession:
                     task.cancel()
                 await asyncio.gather(*tuple(self._network_tasks), return_exceptions=True)
             selected = list(self._pages) if tab_ids is None else list(dict.fromkeys(tab_ids))
+            for tab in selected:
+                self._network_suppressed.add(tab)
+                await self._network_cancel_pending(tab)
             return {'captures': [await self._monitor.stop(tab, 'network') for tab in selected], 'include_new_tabs': self._network_future_options is not None}
 
     async def _frame_geometry(self, frame: _FrameRef) -> tuple[float, float, dict[str, float]]:
@@ -1120,6 +1183,7 @@ class BrowserSession:
                 return
             self._closed = True
             self._network_future_options = None
+            self._network_generation += 1
             for context, callback in self._network_context_listeners.items():
                 context.remove_listener('page', callback)
             self._network_context_listeners.clear()

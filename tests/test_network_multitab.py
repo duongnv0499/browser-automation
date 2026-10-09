@@ -112,3 +112,77 @@ async def test_native_disconnect_preserves_preexisting_tabs(tmp_path):
             await cdp.detach()
         finally:
             await fixture.close()
+
+
+@pytest.mark.asyncio
+async def test_future_hooks_cover_popup_during_existing_capture_attachment(monkeypatch):
+    async with api_site() as (url, _, _), await BrowserSession.launch(headless=True) as browser:
+        first = (await browser.new_tab(url))['id']
+        page = browser._page(first)
+        initial_waiting, release, popup_attached = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        original = browser._monitor.start
+        async def synchronized_start(capture_page, tab, kind, **options):
+            if tab == first:
+                initial_waiting.set()
+                await release.wait()
+            result = await original(capture_page, tab, kind, **options)
+            if tab != first:
+                popup_attached.set()
+            return result
+        monkeypatch.setattr(browser._monitor, 'start', synchronized_start)
+        starting = asyncio.create_task(browser.network_start_many([first], include_new_tabs=True))
+        try:
+            await asyncio.wait_for(initial_waiting.wait(), 5)
+            async with page.expect_popup() as popup_info:
+                await page.evaluate('window.open("/", "during-attach")')
+            popup = await popup_info.value
+            await popup.wait_for_load_state()
+            await asyncio.wait_for(popup_attached.wait(), 5)
+            tab = browser._ids[popup]
+            async with popup.expect_response(lambda response: response.request.method == 'POST'):
+                await popup.click('#send')
+            assert any(event.get('method') == 'POST' for event in browser._monitor.list(tab, 'network')['events'])
+        finally:
+            release.set()
+            await starting
+
+
+@pytest.mark.asyncio
+async def test_selective_stop_cancels_pending_popup_attachment_and_explicit_restart(monkeypatch):
+    async with api_site() as (url, _, _), await BrowserSession.launch(headless=True) as browser:
+        first = (await browser.new_tab(url))['id']
+        page = browser._page(first)
+        await browser.network_start_many([first], include_new_tabs=True)
+        attached, release, cancelled = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        original = browser._monitor.start
+        async def synchronized_start(capture_page, tab, kind, **options):
+            result = await original(capture_page, tab, kind, **options)
+            if tab != first:
+                attached.set()
+                try:
+                    await release.wait()
+                except asyncio.CancelledError:
+                    cancelled.set()
+                    raise
+            return result
+        monkeypatch.setattr(browser._monitor, 'start', synchronized_start)
+        async with page.expect_popup() as popup_info:
+            await page.evaluate('window.open("/", "pending-attach")')
+        popup = await popup_info.value
+        await popup.wait_for_load_state()
+        await asyncio.wait_for(attached.wait(), 5)
+        tab = browser._ids[popup]
+        await browser.network_stop_many([tab])
+        assert cancelled.is_set()
+        release.set()
+        with pytest.raises(ValueError, match='No active monitor'):
+            browser._monitor.list(tab, 'network')
+        async with popup.expect_response(lambda response: response.request.method == 'POST'):
+            await popup.click('#send')
+        with pytest.raises(ValueError, match='No active monitor'):
+            browser._monitor.list(tab, 'network')
+        restarted = await browser.network_start_many([tab])
+        assert restarted['captures'][0]['active']
+        async with popup.expect_response(lambda response: response.request.method == 'POST'):
+            await popup.click('#send')
+        assert any(event.get('method') == 'POST' for event in browser._monitor.list(tab, 'network')['events'])
