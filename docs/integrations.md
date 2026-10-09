@@ -92,18 +92,34 @@ Hermes explicitly controls the child environment; add the provider credential lo
 
 The instruction-only `skills/browser-automation/SKILL.md` follows the Agent Skills standard. It recommends bounded Luna `run` goals rather than unnecessary step-by-step direct actions, preserves returned session IDs, distinguishes native/isolated browser choice, budgets page text/images, pauses for host-generated approvals, and requires independent completion evidence. It does not install tools or grant permissions. Tools work without it; clients may also consume server initialize instructions.
 
-Install only into your intended client scope; do not overwrite an existing same-name skill. From the checkout, these personal installations copy the self-contained skill directory (no external relative resources):
+Install only into your intended client scope; do not overwrite an existing same-name skill. From the checkout, Codex and Claude's documented symlink support keeps the skill updated; keep the checkout at this absolute location. The guard rejects existing directories and broken symlinks alike (no `ln -f`). Hermes uses a guarded copy because symlink discovery is not assumed here.
 
 ```sh
+skill_source="$PWD/skills/browser-automation"
 # Codex: ~/.agents/skills; project alternative .agents/skills
 mkdir -p "$HOME/.agents/skills"
-cp -R skills/browser-automation "$HOME/.agents/skills/browser-automation"
+skill_dest="$HOME/.agents/skills/browser-automation"
+if [ ! -e "$skill_dest" ] && [ ! -L "$skill_dest" ]; then
+  ln -s "$skill_source" "$skill_dest"
+else
+  printf '%s\n' "Existing skill retained: $skill_dest"
+fi
 # Claude Code: ~/.claude/skills; project alternative .claude/skills
 mkdir -p "$HOME/.claude/skills"
-cp -R skills/browser-automation "$HOME/.claude/skills/browser-automation"
+skill_dest="$HOME/.claude/skills/browser-automation"
+if [ ! -e "$skill_dest" ] && [ ! -L "$skill_dest" ]; then
+  ln -s "$skill_source" "$skill_dest"
+else
+  printf '%s\n' "Existing skill retained: $skill_dest"
+fi
 # Hermes: default profile's primary ~/.hermes/skills directory
 mkdir -p "$HOME/.hermes/skills"
-cp -R skills/browser-automation "$HOME/.hermes/skills/browser-automation"
+skill_dest="$HOME/.hermes/skills/browser-automation"
+if [ ! -e "$skill_dest" ] && [ ! -L "$skill_dest" ]; then
+  cp -R "$skill_source" "$skill_dest"
+else
+  printf '%s\n' "Existing skill retained: $skill_dest"
+fi
 ```
 
 Codex supports explicit `$browser-automation` and `/skills` discovery, plus implicit description matching. Claude Code supports `/browser-automation`; restart/reload if the skill does not appear and review workspace trust. Hermes documents `/browser-automation` and `skills_list`/`skill_view` progressive disclosure; named profiles may have different home directories. These are documented discovery contracts, not a claim that all three installed clients were exercised. MCP tool names can have client-specific prefixes; choose the discovered logical `run`/session tools rather than hardcoding a prefix.

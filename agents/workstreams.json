@@ -8,7 +8,7 @@
     "Browser": ["src/browser_automation/browser.py", "src/browser_automation/snapshot.js", "tests/test_browser*.py", "docs/browser.md", "agents/browser.json"],
     "Decision": ["src/browser_automation/providers.py", "src/browser_automation/agent.py", "provider/agent tests", "docs/providers.md", "agents/decision.json"],
     "Integration": ["src/browser_automation/service.py", "src/browser_automation/cli.py", "src/browser_automation/mcp.py", "integrations/", "integration tests", "docs/integrations.md", "agents/integration.json"]
-    ,"HttpTransport": ["src/browser_automation/mcp_http.py", "src/browser_automation/mcp.py", "src/browser_automation/cli.py", "src/browser_automation/service.py", "pyproject.toml", "uv.lock", ".env.example", "tests/test_mcp_http.py", "agents/http.json"],
+    ,"HttpTransport": ["src/browser_automation/mcp_http.py", "src/browser_automation/mcp.py", "src/browser_automation/cli.py", "pyproject.toml", "uv.lock", ".env.example", "tests/test_mcp_http.py", "tests/test_mcp_http_browser.py", "agents/http.json"],
     "DocsSkill": ["skills/browser-automation/SKILL.md", "docs/http.md", "docs/integrations.md", "docs/architecture.md", "docs/research.md", "README.md", "CHANGELOG.md", "agents/workstreams.json", "agents/skill.json"]
   },
   "contracts": {
@@ -148,12 +148,12 @@
   "http_skill_feature": {
     "date": "2026-10-09",
     "goal": "Keep stdio/CLI/OMP unchanged while adding authenticated Streamable HTTP on the browser host and a portable professional decision-first browser skill.",
-    "phase": "Implementation; coordinated verification awaits both workers READY and Main authorization",
+    "phase": "Both workers READY; Main authorized scoped HTTP and skill verification; skill validator/structural smoke/installed Codex discovery passed; final suite/build awaits stable HTTP and Main authorization",
     "protocol": "Official SDK framing; distinguish latest 2026-07-28 stateless transport from legacy 2025-11-25 session compatibility; no unverified universal-client claim",
     "security": "BROWSER_MCP_TOKEN required; Host and Origin validation, request bounds, bounded ownership/idle lifetime; browser and native consent live on server host; never expose CDP",
     "preserved": ["doc.md", "existing stdio default", "CLI JSONL", "OMP extension stdio worker", "native consent", "host-generated exact approval tokens"],
-    "verification": "No feature checks run yet; Main authorizes coordinated real HTTP/SDK/browser/security/skill checks after READY",
-    "git_evidence": []
+    "verification": "Authorized skills-ref validation passed (upstream69ef37e9424c0a7ea9dd2293b559e43ec8176379); structural metadata/resource/21 local link smoke passed; actual Codex app-server skills/list returned enabled browser-automation in isolated temporary HOME/project, no paid turn. Scoped HTTP evidence pending.",
+    "git_evidence": [{"commit":"d2dd45e96ddfa2d5ef9a8c02d400764b4ad2bb10","feature":"portable skill","push":"origin/main successful"},{"commit":"e01f349f91084b4208e6fae4be8bf064e54fc09b","feature":"HTTP/client deployment documentation","push":"origin/main successful"},{"commit":"25e4095db09e87d5b52d03880f78057a6b18dd41","feature":"HTTP dual-era transport exact handed-off paths","push":"origin/main successful"}]
   },
   "resume": "Re-read AGENTS.md, this file, own state, and current owned source; retain scope/research/security/verification/commit rules."
 }

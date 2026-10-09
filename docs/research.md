@@ -34,6 +34,21 @@ Primary URLs accessed **2026-10-09**; these contracts are documentation research
 
 The portable skill is standalone and uses discovered logical tool names regardless of client namespace. It guides goal/acceptance/scope, explicit browser mode, persistent IDs, Luna decision-first bounded `run`, context/privacy budgets, exact host approvals, stale rejection, independent rendered outcome evidence and safe stop/cleanup. Its Facebook shortlist/draft example is not an exercised benchmark. Native consent and provider credentials are server-side and distinct from MCP bearer tokens. The existing OMP extension remains stdio/JSONL; no HTTP capability is inferred there. TLS/proxy configuration is an operator recipe, not evidence of deployed HTTPS. Actual HTTP and skill verification must be recorded after the coordinated authorization gate.
 
+Installed-client schema inspection on 2026-10-09: `codex mcp add --help` executed successfully and lists `--url <URL>` for Streamable HTTP plus `--bearer-token-env-var <ENV_VAR>` (HTTP-only). This confirms the documented command shape, not authenticated connection, skill discovery, tool execution or paid-model behavior. Claude `${VAR}` Authorization expansion above is primary-documentation evidence; no installed Claude invocation is inferred.
+
+### Authorized portable skill verification
+
+After Main's coordinated gate authorization, the official reference validator ran:
+
+```sh
+uvx --from 'git+https://github.com/agentskills/agentskills.git#subdirectory=skills-ref' \
+  skills-ref validate skills/browser-automation
+```
+
+It returned **Valid skill**; uv resolved the reference tool at upstream commit `69ef37e9424c0a7ea9dd2293b559e43ec8176379`. A separate structural smoke checked required frontmatter/name/description/compatibility bounds, the 48-line SKILL.md, zero external local skill-resource dependencies, and existence of 21 local documentation link targets. It did not pin source wording or evaluate model compliance.
+
+Actual installed **Codex app-server** discovery also passed: a temporary project `.agents/skills/browser-automation` symlink to the source skill, isolated temporary HOME/CODEX_HOME, and secret-stripped child environment were used. Only `initialize`, `initialized`, and `skills/list` (`cwds`, `forceReload:true`) were sent; the response returned `browser-automation`, `enabled:true`, `scope:repo`, and the correct source path. No thread/turn or paid model was invoked, and user configuration was unchanged. Machine-local evidence is `/tmp/browser-skill-proof-qjbtxeun/skills-list.json`. Protocol source: [Codex app-server](https://developers.openai.com/codex/app-server), accessed 2026-10-09. This proves that installed Codex discovers the skill, not that an agent follows every instruction. Actual installed Claude/Hermes discovery remains unexercised; their paths/invocations are documentation-based.
+
 
 ## What is measured
 
