@@ -31,6 +31,9 @@ async def test_actual_omp_extension_load(tmp_path):
                 assert frame.get("type") != "extension_error", frame
                 if "browser_extension_probe" in frame:
                     assert frame["browser_extension_probe"]["name"] == "browser_agent"
+                    catalog = json.dumps(frame["browser_extension_probe"])
+                    for name in ("network_detail", "network_body", "network_call", "network_replay", "network_execute", "network_start_many", "network_list_many", "network_stop_many"):
+                        assert name in catalog, catalog
                     break
             process.stdin.write((json.dumps({"id": "doctor-proof", "type": "prompt", "message": "/browser-agent-doctor"}) + "\n").encode())
             await process.stdin.drain()
@@ -128,3 +131,44 @@ try {
     result = json.loads(output)
     assert result["details"]["error"]["diagnostic"]["changed_region"] == {"x": 10, "y": 20, "width": 30, "height": 40}
     (tmp_path / "omp-structured-error-proof.json").write_text(json.dumps(result, indent=2))
+
+
+async def test_omp_network_cookie_context_and_binary_body(tmp_path):
+    from test_network_surface import network_site, NETWORK_TOOLS
+    extension = Path(__file__).resolve().parents[1] / "integrations/omp/browser-tools.mjs"
+    async with network_site() as (origin, seen):
+        script = tmp_path / "network-consumer.mjs"
+        script.write_text('''import extension from ''' + json.dumps(extension.as_uri()) + ''';
+let commands = []; let tool; let shutdown;
+const chain = new Proxy(() => {}, { get: (_target, key) => key === "enum" ? values => { commands = values; return chain; } : chain, apply: () => chain });
+extension({zod:chain,registerTool(value){tool=value;},registerCommand(){},on(name,callback){if(name==="session_shutdown")shutdown=callback;}});
+const invoke = async (command, arguments_) => {
+ const result = await tool.execute("network-"+command,{command,arguments:arguments_});
+ if(result.details.status === "error") throw new Error(JSON.stringify(result.details));
+ return result.details;
+};
+try {
+ if(commands.length!==29)throw new Error("Wrong command catalog");
+ const opened=await invoke("launch",{headless:true});
+ const first=await invoke("new_tab",{session_id:opened.session_id,url:process.env.FIXTURE_ORIGIN});
+ const second=await invoke("new_tab",{session_id:opened.session_id,url:process.env.FIXTURE_ORIGIN});
+ const args={session_id:opened.session_id,tab_id:first.tab.id};
+ await invoke("network_start_many",{session_id:opened.session_id,tab_ids:[first.tab.id,second.tab.id]});
+ const response=await invoke("network_call",{...args,url:process.env.FIXTURE_ORIGIN+"/binary"});
+ if(response.provenance!=="browser_context_api_request" || response.status!==200)throw new Error("Wrong API provenance/status");
+ const body=await invoke("network_body",{...args,request_id:response.request_id,limit:2048});
+ if(body.encoding!=="base64" || Buffer.from(body.data,"base64").length!==2048)throw new Error("Binary body lost");
+ const plan=await invoke("network_call",{...args,url:process.env.FIXTURE_ORIGIN+"/api",method:"POST",json_body:{ordinary:"omp"}});
+ if(plan.status!=="approval_required")throw new Error("Consequential call sent without approval");
+ await invoke("close",{session_id:opened.session_id});
+ console.log(JSON.stringify({commands,provenance:response.provenance,binary_bytes:2048,approval_status:plan.status}));
+}finally{shutdown();}
+''')
+        process = await asyncio.create_subprocess_exec("node", str(script), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env={**os.environ, "BROWSER_AGENT_PYTHON": sys.executable, "FIXTURE_ORIGIN": origin})
+        output, errors = await asyncio.wait_for(process.communicate(), 45)
+        assert process.returncode == 0, errors.decode()
+        result = json.loads(output)
+        assert NETWORK_TOOLS <= set(result["commands"])
+        binary = [request for request in seen if request["target"] == "/binary"]
+        assert len(binary) == 1 and "fixture_session=private-cookie" in binary[0]["headers"]["cookie"]
+        assert not any(request["method"] == "POST" for request in seen)
