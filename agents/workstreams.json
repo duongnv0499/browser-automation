@@ -1,13 +1,15 @@
 {
   "goal": "Production-usable Python browser automation with explicit native Chrome consent or isolated launch, OpenRouter-primary/OpenAI Decisions, guarded observation/control, CLI/MCP and available OMP integration.",
   "parent_role": "Research initially; then PM, architecture and review only. Workers implement and repair owned paths.",
-  "git_owner": "Harness serialized feature commits/pushes; ownership transferred to HarnessFinal for the final integration evidence and unified verification release commits/push. Stage exact owned paths only; no force/reset or git add .",
+  "git_owner": "DocsSkill exclusively serializes exact-path feature commits and origin/main pushes for Streamable HTTP and portable skill milestones. No git add ., force/reset, or unrelated paths.",
   "verification_gate": "All workers READY first; parent authorizes unified checks. No mid-flight tests/builds/lint/smokes.",
   "ownership": {
     "Harness": ["AGENTS.md", "agents/worker-instructions.md", "agents/workstreams.json", "README.md", "pyproject.toml", "uv.lock", ".gitignore", ".env.example", "src/browser_automation/__init__.py", "docs/architecture.md", "docs/research.md", "CHANGELOG.md"],
     "Browser": ["src/browser_automation/browser.py", "src/browser_automation/snapshot.js", "tests/test_browser*.py", "docs/browser.md", "agents/browser.json"],
     "Decision": ["src/browser_automation/providers.py", "src/browser_automation/agent.py", "provider/agent tests", "docs/providers.md", "agents/decision.json"],
     "Integration": ["src/browser_automation/service.py", "src/browser_automation/cli.py", "src/browser_automation/mcp.py", "integrations/", "integration tests", "docs/integrations.md", "agents/integration.json"]
+    ,"HttpTransport": ["src/browser_automation/mcp_http.py", "src/browser_automation/mcp.py", "src/browser_automation/cli.py", "src/browser_automation/service.py", "pyproject.toml", "uv.lock", ".env.example", "tests/test_mcp_http.py", "agents/http.json"],
+    "DocsSkill": ["skills/browser-automation/SKILL.md", "docs/http.md", "docs/integrations.md", "docs/architecture.md", "docs/research.md", "README.md", "CHANGELOG.md", "agents/workstreams.json", "agents/skill.json"]
   },
   "contracts": {
     "runtime": "Python >=3.11, async methods, src/browser_automation package",
@@ -142,6 +144,16 @@
       "matched Jev/Codex comparison"
     ],
     "claims": "Controlled fixture attachment, real browser, synthetic local-provider and paid-provider evidence remain separate; no superiority or blanket security guarantee"
+  },
+  "http_skill_feature": {
+    "date": "2026-10-09",
+    "goal": "Keep stdio/CLI/OMP unchanged while adding authenticated Streamable HTTP on the browser host and a portable professional decision-first browser skill.",
+    "phase": "Implementation; coordinated verification awaits both workers READY and Main authorization",
+    "protocol": "Official SDK framing; distinguish latest 2026-07-28 stateless transport from legacy 2025-11-25 session compatibility; no unverified universal-client claim",
+    "security": "BROWSER_MCP_TOKEN required; Host and Origin validation, request bounds, bounded ownership/idle lifetime; browser and native consent live on server host; never expose CDP",
+    "preserved": ["doc.md", "existing stdio default", "CLI JSONL", "OMP extension stdio worker", "native consent", "host-generated exact approval tokens"],
+    "verification": "No feature checks run yet; Main authorizes coordinated real HTTP/SDK/browser/security/skill checks after READY",
+    "git_evidence": []
   },
   "resume": "Re-read AGENTS.md, this file, own state, and current owned source; retain scope/research/security/verification/commit rules."
 }

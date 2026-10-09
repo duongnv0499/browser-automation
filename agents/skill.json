@@ -1,0 +1,20 @@
+{
+  "owner": "DocsSkill",
+  "date": "2026-10-09",
+  "paths": ["skills/browser-automation/SKILL.md", "docs/http.md", "docs/integrations.md", "docs/architecture.md", "docs/research.md", "README.md", "CHANGELOG.md", "agents/workstreams.json", "agents/skill.json"],
+  "git_owner": "Exclusive serialized exact-path commits and origin/main push for own and HTTP feature milestones; no git add ., force/reset",
+  "phase": "Portable skill and client/deployment documentation authored; awaiting HTTP READY alignment and Main coordinated verification authorization",
+  "contracts": {
+    "skill": "Standalone instruction-only Agent Skills standard frontmatter; name matches browser-automation directory; no external references or unused helper; source/sdist inclusion coordinated with HttpTransport",
+    "workflow": "Bounded goals/acceptance/scope, explicit native vs isolated, persisted IDs, Luna decision-first run, direct act only diagnostic/user-approved, context/image budgets, exact host-generated approvals, stale no replay, independent rendered evidence, blocked/cancel stop, privacy/no stealth",
+    "clients": "Document current Codex/Claude HTTP bearer and Codex/Claude/Hermes skill discovery; existing OMP stays stdio; same logical tools across transports/client prefixes",
+    "http": "Server/browser on browser host, /mcp, BROWSER_MCP_TOKEN or distinct identity JSON tokens, modern same-token trust domain deliberately shared, legacy authenticated session isolation; secure loopback/TLS proxy recipe, no remote CDP",
+    "preserve": "doc.md unchanged; no unrelated browser/provider changes or universal-client/live-model claims"
+  },
+  "primary_research": "2026-10-09 Agent Skills specification, current Codex skills/MCP, Claude Code skills/MCP, Hermes skills, official SDK Client transports/legacy docs and current/legacy MCP HTTP transports recorded in docs/research.md",
+  "checks_run": [],
+  "acceptance_checks_after_authorization": ["skills-ref validate skills/browser-automation", "frontmatter and referenced-file structural smoke", "installed-client skill discovery where feasible without paid model", "align docs with actual HTTP gate evidence, protocol versions, security/lifecycle and proxy limitations"],
+  "git_evidence": [],
+  "limitations": ["No live Luna credentials available", "HTTP and skill feature checks not yet exercised", "Personal logged-in Chrome and actual Facebook benchmark not claimed", "TLS deployment configuration is a recipe, not exercised HTTPS proof"],
+  "resume": "Read AGENTS.md, agents/workstreams.json, this state and current owned sections. Never run checks before Main authorizes; collect HTTP exact paths/message for serialized commit/push and record actual results only."
+}
