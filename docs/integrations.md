@@ -45,6 +45,28 @@ Start `uv run browser-agent serve`, keep its stdin/stdout open, and send one JSO
 
 Use fresh observations after actions. Stale/covered/wrong-tab/unsupported actions fail rather than targeting a guessed selector. Direct external `act` uses the same observed-element risk policy as autonomous runs: consequential/custom/visual controls and potentially submitting keys pause for exact host approval rather than bypassing policy. Service keeps at most eight bounded observation metadata records globally, without screenshots; each browser session also retains eight revisions, so browser operations performed during `run` can evict earlier external snapshots. Full text continuation delegates to that browser revision cache. `text_length` reports the captured prefix length; `source_truncated` means source beyond the hard safety cap was omitted, and `next_offset: null` means the cache is exhausted, not that every DOM byte was captured. Evicted revisions require a fresh observation.
 
+### Bounded navigation and semantic observation
+
+`new_tab` accepts `wait_until` (`commit`, `domcontentloaded`, `load`, `networkidle`) and `timeout_ms` (1–120000, default 15000). A bounded timeout returns the owned tab ID and `navigation_status: "timeout"`, not a closed uninspectable tab. Retain it, observe the rendered page, and explicitly close owned work when appropriate; never infer a site's blocking cause from a timeout alone.
+
+`observe` adds `coverage` and DOM-derived `page_state`; `truncated: false` does not mean every rendered semantic control was collected. `interpret_visual: true` explicitly requests a screenshot plus paid multimodal interpretation (`provider`/`model` optional); it is not the same as merely capturing `screenshot: true`. DOM/vision provenance remains separate and provider failure is explicit. [Recovery policy](providers.md#operator-controlled-recovery) is host-only: snapshot-bound `reload` defaults to exact approval; a button's Refresh label grants no authority.
+
+### Scoped traffic diagnostics
+
+Tools `network_start`, `network_list`, `network_stop`, `websocket_start`, `websocket_list`, `websocket_stop` use the same retained `session_id`/`tab_id` as observation. Start accepts `max_events` (1–4096, default 256), literal substring `url_filter` (at most 256 characters), `payloads` (default false) and `max_payload_bytes` (1–4096, default 512). List accepts optional integer `cursor >= 0` and `limit` (1–1000, default 100). Inspect returned cursor/drop/history metadata rather than assuming complete history. Start before triggering the interaction; stop/close removes listeners and other tabs are not captured.
+
+```json
+{"id":7,"command":"network_start","arguments":{"session_id":"RETURNED_SESSION","tab_id":"RETURNED_TAB","max_events":256}}
+{"id":8,"command":"network_list","arguments":{"session_id":"RETURNED_SESSION","tab_id":"RETURNED_TAB","limit":100}}
+{"id":9,"command":"network_stop","arguments":{"session_id":"RETURNED_SESSION","tab_id":"RETURNED_TAB"}}
+```
+
+HTTP 503 is a response status, not a transport failure. Defaults exclude bodies, cookies, Authorization and POST data; URLs are sanitized. Website WebSocket inventory/frames are distinct from the CDP transport. Opcode, size, lifecycle, `capture_started_at` and incomplete-history metadata do not require text payloads. Text payloads require both requested opt-in and host `BROWSER_MONITOR_PAYLOADS=1`; bounded redaction cannot guarantee all secrets are removed. Binary frames are metadata only. Do not enable payloads on private account traffic just to diagnose connectivity.
+
+### Incremental progress
+
+JSONL opts in with a top-level `"progress": true` on the request. Interim `{"id":...,"progress":event}` records precede the normal final `result`/`error`; they never resolve a pending request. MCP opts in per call through `params._meta.progressToken`, not a tool argument. Notifications use the active token, monotonically increasing progress, compact semantic JSON messages and no invented total. The official SDK client uses `call_tool(..., progress_callback=async_callback)` with callback `(progress, total, message)`. [HTTP](http.md#progress-and-cancellation) uses the same public contract. Cancellation stops only that request; do not replay or close unrelated sessions. Progress is bounded page-state evidence, not raw screenshots/text or success proof.
+
 ## MCP stdio
 
 The MCP server supports initialization, version negotiation, tools/list, tools/call, ping, cancellation, and EOF cleanup. Its tools mirror the CLI commands above plus `doctor`, `tabs`, `close_tab`, `run`, `upload`, `download`, `connect_default`. `observe` returns compact structured/text metadata and screenshot in a separate `image/png` MCP image block, not a base64 string stuffed into text. Tool failures use `isError` with structured `error`; JSON-RPC failures use protocol errors.

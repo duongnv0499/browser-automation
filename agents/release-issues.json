@@ -1,0 +1,126 @@
+{
+  "owner": "ReleaseDocs",
+  "date": "2026-10-09",
+  "phase": "implementation; waiting for owner implementation handoffs and parent verification authorization",
+  "issues": {
+    "01": {
+      "title": "protected subframes",
+      "owner": "BrowserCore",
+      "report": "issues/01-protected-subframes.md",
+      "acceptance": "Hidden data/blob frames preserve main DOM and screenshot; safely identify skipped frame/reason; protected main documents remain denied; visible protected frames masked or screenshot withheld, never leaked.",
+      "status": "implementation_in_progress",
+      "evidence": []
+    },
+    "02": {
+      "title": "semantic DOM coverage",
+      "owner": "BrowserCore",
+      "report": "issues/02-youtube-empty-dom.md",
+      "acceptance": "Generic custom elements/open shadow/display:contents/zero-box/clipping fixtures expose rendered controls; coverage distinct truncation; accessible live YouTube compared to screenshot or explicit access limitation.",
+      "status": "implementation_in_progress",
+      "evidence": []
+    },
+    "03": {
+      "title": "bounded navigation",
+      "owner": "BrowserCore",
+      "report": "issues/03-load-timeout.md",
+      "acceptance": "Pending-load rendered fixture retains owned tab ID, navigation_status timeout and usable observation/cleanup; configurable wait_until/timeout_ms; no infinite retry.",
+      "status": "implementation_in_progress",
+      "evidence": []
+    },
+    "04": {
+      "title": "recovery policy",
+      "owner": "DecisionState",
+      "report": "issues/04-refresh-policy.md",
+      "acceptance": "Snapshot-bound reload recommendation explains data loss/default host approval; host-only exact-origin exception requires complete DOM error evidence and no unsaved/editable/sensitive evidence; custom Refresh remains normal risky click.",
+      "status": "implementation_in_progress",
+      "evidence": []
+    },
+    "05": {
+      "title": "network inspection",
+      "owner": "Traffic",
+      "report": "issues/05-network.md",
+      "acceptance": "Real browser captures UI-hidden HTTP503 response distinctly from requestfailed with redirects/timing/content-type; bounded tab-scoped cursor/filter and listener cleanup; no default body/auth/cookies/postdata.",
+      "status": "ready_unverified",
+      "evidence": []
+    },
+    "06": {
+      "title": "application WebSocket inspection",
+      "owner": "Traffic",
+      "report": "issues/06-websocket.md",
+      "acceptance": "Real open/sent/received/ping/pong/binary/close/error opcode and size events without UI disclosure; scoped cursor/filter/cleanup, capture_started_at/incomplete_history; host-and-call opt-in bounded redacted text, binary metadata only.",
+      "status": "ready_unverified",
+      "evidence": []
+    },
+    "07": {
+      "title": "target-local pixels",
+      "owner": "BrowserCore",
+      "report": "issues/07-animated-visual.md",
+      "acceptance": "Unrelated animation outside observed target permits action, target change rejects with region diagnostic; preserve semantic/geometry/occlusion, exact target pixel compare, no tolerance/replay.",
+      "status": "implementation_in_progress",
+      "evidence": []
+    },
+    "08": {
+      "title": "parent semantic progress",
+      "owner": "DecisionState + Surface",
+      "report": "issues/08-parent-state.md",
+      "acceptance": "DOM/vision provenance distinct; unprimed arbitrary visual-only text through actual local HTTP multimodal provider fixture clearly labeled, recovery approval required; parent progress before final across stdio/modern+legacy HTTP/JSONL/OMP; cancellation preserves unrelated session.",
+      "status": "implementation_in_progress",
+      "evidence": []
+    }
+  },
+  "shared_contracts": {
+    "navigation": {
+      "url": "about:blank",
+      "wait_until": "domcontentloaded",
+      "timeout_ms": 15000,
+      "response_fields": [
+        "id",
+        "url",
+        "title",
+        "navigation_status",
+        "wait_until",
+        "diagnostic on timeout"
+      ]
+    },
+    "observation": "coverage {status:complete|partial|unknown,reasons,dom_elements} separate from text truncation; page_state DOM evidence; screenshot page viewport, not desktop",
+    "monitors": "BrowserSession monitor_start/list/stop; network_start/list/stop and websocket_start/list/stop exposed; max_events=256,limit=100,url_filter optional; payloads false,max_payload_bytes=512",
+    "recovery": "BROWSER_RECOVERY_POLICY host JSON reload_without_approval_origins; no caller policy authority; reload exact revision/action approval default",
+    "vision": "interpret_visual false default; opt-in captures PNG and performs configured multimodal text call; source vision/self_reported_confidence not calibrated; DOM and vision separate",
+    "progress": "async on_progress event callback, monotonic bounded seq/page_state/step/status; MCP per-call _meta.progressToken; JSONL progress true interim id/progress; OMP interim onUpdate not final response"
+  },
+  "research": {
+    "date": "2026-10-09",
+    "record": "docs/research.md"
+  },
+  "commits": [
+    {
+      "hash": "2569461",
+      "feature": "DOM state/recovery",
+      "pushed": true
+    },
+    {
+      "hash": "f1b6b00",
+      "feature": "HTTP/WebSocket monitor",
+      "pushed": true
+    },
+    {
+      "hash": "fc3370c",
+      "feature": "navigation/observation safety",
+      "pushed": true
+    }
+  ],
+  "verification": {
+    "authorized": false,
+    "scoped": {},
+    "global": null,
+    "build": null,
+    "installed_wheel": null
+  },
+  "limits": [
+    "No personal native Chrome profile or macOS available in this Linux environment.",
+    "No paid-provider keys; local deterministic HTTP fixture is not live model quality/OCR capability evidence.",
+    "Original Facebook/TikTok reports preserved, no live repaired claim."
+  ],
+  "preservation": "doc.md and all issues/*.md unchanged",
+  "docs_status": "Interfaces aligned with owner contracts; verification/evidence finalization awaits all READY and parent authorization."
+}

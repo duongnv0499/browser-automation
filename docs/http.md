@@ -149,6 +149,27 @@ asyncio.run(main())
 
 The v2 SDK uses `httpx2`, not old `httpx` tutorials; authentication/timeouts belong on `httpx2.AsyncClient`, not a removed `headers=` argument to `streamable_http_client`. `Client` enters/negotiates automatically; `mode="legacy"` explicitly exercises legacy initialization when needed. The client-side 8 MiB SSE event allowance permits reasonable screenshot responses without an unlimited cap; it is separate from the server's inbound body bound. Always check `is_error` and consume image blocks separately from structured/text metadata. See the [official transport API](https://py.sdk.modelcontextprotocol.io/client/transports/index.md).
 
+## Progress and cancellation
+
+Progress is opt-in **per tool call**, on modern and negotiated legacy HTTP alike; it is not an extra tool parameter or a connection-wide subscription. The SDK supplies the active request's progress token and delivers incremental semantic messages through its callback:
+
+```python
+async def show(progress, total, message):
+    # message is bounded semantic JSON; avoid logging sensitive account details.
+    print(progress, message)
+
+result = await client.call_tool(
+    "run",
+    {"session_id": session_id, "tab_id": tab_id,
+     "goal": "Read the visible status; do not submit or reload", "max_steps": 10},
+    progress_callback=show,
+)
+```
+
+The counter increases; `total` is omitted when unknown. Messages distinguish observe/reobserve, blocked/approval, completion and cancellation, with DOM/vision provenance rather than screenshots or full page text. Receiving a progress event is not independent verification or a successful final result. Client callbacks should stay fast: the SDK notes that a slow real-transport callback may still finish after `call_tool` returns.
+
+Current HTTP cancellation is request-SSE disconnect; legacy clients use negotiated cancellation notifications. Neither closes unrelated browser sessions nor retries an action. A cancelled input may already have changed the page: inspect afresh before deciding what to do. Tool schemas, [scoped monitors](integrations.md#scoped-traffic-diagnostics), [visual opt-in and host recovery policy](providers.md#page-state-and-opt-in-visual-interpretation) are shared with stdio; bearer authentication cannot grant model authority to change host policy.
+
 ## Remote deployment through TLS
 
 Prefer a private authenticated tunnel or reviewed reverse proxy. Keep the application/CDP bound to loopback. Direct network binding requires explicit repeated `--allow-host` entries; authentication is still required. Host entries are exact authorities (`host[:port]`), not wildcard permission. An absent Origin is allowed for authenticated native clients; an Origin present on any route must exactly match a repeated `--allow-origin` entry. No arbitrary browser origins or wildcard CORS should be enabled.

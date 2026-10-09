@@ -1,17 +1,81 @@
 {
   "goal": "Production-usable Python browser automation with explicit native Chrome consent or isolated launch, OpenRouter-primary/OpenAI Decisions, guarded observation/control, CLI/MCP and available OMP integration.",
   "parent_role": "Research initially; then PM, architecture and review only. Workers implement and repair owned paths.",
-  "git_owner": "SetupProof exclusively serializes exact-path commits and origin/main pushes for agent-directed installation docs. No git add ., force/reset, or unrelated paths.",
+  "git_owner": "ReleaseDocs exclusively stages exact owner-approved paths, commits and pushes origin/main serially; no git add ., force/reset, or unrelated user paths.",
   "verification_gate": "All workers READY first; parent authorizes unified checks. No mid-flight tests/builds/lint/smokes.",
   "ownership": {
-    "Harness": ["AGENTS.md", "agents/worker-instructions.md", "agents/workstreams.json", "README.md", "pyproject.toml", "uv.lock", ".gitignore", ".env.example", "src/browser_automation/__init__.py", "docs/architecture.md", "docs/research.md", "CHANGELOG.md"],
-    "Browser": ["src/browser_automation/browser.py", "src/browser_automation/snapshot.js", "tests/test_browser*.py", "docs/browser.md", "agents/browser.json"],
-    "Decision": ["src/browser_automation/providers.py", "src/browser_automation/agent.py", "provider/agent tests", "docs/providers.md", "agents/decision.json"],
-    "Integration": ["src/browser_automation/service.py", "src/browser_automation/cli.py", "src/browser_automation/mcp.py", "integrations/", "integration tests", "docs/integrations.md", "agents/integration.json"]
-    ,"HttpTransport": ["src/browser_automation/mcp_http.py", "src/browser_automation/mcp.py", "src/browser_automation/cli.py", "pyproject.toml", "uv.lock", ".env.example", "tests/test_mcp_http.py", "tests/test_mcp_http_browser.py", "agents/http.json"],
-    "DocsSkill": ["skills/browser-automation/SKILL.md", "docs/http.md", "docs/integrations.md", "docs/architecture.md", "docs/research.md", "README.md", "CHANGELOG.md", "agents/workstreams.json", "agents/skill.json"]
-    ,"SetupDocs": ["install.md", "README.md", "docs/integrations.md", "docs/http.md", "agents/setup-docs.json"],
-    "SetupProof": ["agents/setup-proof.json", "agents/workstreams.json", "docs/research.md", "CHANGELOG.md"]
+    "Harness": [
+      "AGENTS.md",
+      "agents/worker-instructions.md",
+      "agents/workstreams.json",
+      "README.md",
+      "pyproject.toml",
+      "uv.lock",
+      ".gitignore",
+      ".env.example",
+      "src/browser_automation/__init__.py",
+      "docs/architecture.md",
+      "docs/research.md",
+      "CHANGELOG.md"
+    ],
+    "Browser": [
+      "src/browser_automation/browser.py",
+      "src/browser_automation/snapshot.js",
+      "tests/test_browser*.py",
+      "docs/browser.md",
+      "agents/browser.json"
+    ],
+    "Decision": [
+      "src/browser_automation/providers.py",
+      "src/browser_automation/agent.py",
+      "provider/agent tests",
+      "docs/providers.md",
+      "agents/decision.json"
+    ],
+    "Integration": [
+      "src/browser_automation/service.py",
+      "src/browser_automation/cli.py",
+      "src/browser_automation/mcp.py",
+      "integrations/",
+      "integration tests",
+      "docs/integrations.md",
+      "agents/integration.json"
+    ],
+    "HttpTransport": [
+      "src/browser_automation/mcp_http.py",
+      "src/browser_automation/mcp.py",
+      "src/browser_automation/cli.py",
+      "pyproject.toml",
+      "uv.lock",
+      ".env.example",
+      "tests/test_mcp_http.py",
+      "tests/test_mcp_http_browser.py",
+      "agents/http.json"
+    ],
+    "DocsSkill": [
+      "skills/browser-automation/SKILL.md",
+      "docs/http.md",
+      "docs/integrations.md",
+      "docs/architecture.md",
+      "docs/research.md",
+      "README.md",
+      "CHANGELOG.md",
+      "agents/workstreams.json",
+      "agents/skill.json"
+    ],
+    "SetupDocs": [
+      "install.md",
+      "README.md",
+      "docs/integrations.md",
+      "docs/http.md",
+      "agents/setup-docs.json"
+    ],
+    "SetupProof": [
+      "agents/setup-proof.json",
+      "agents/workstreams.json",
+      "docs/research.md",
+      "CHANGELOG.md"
+    ]
   },
   "contracts": {
     "runtime": "Python >=3.11, async methods, src/browser_automation package",
@@ -153,11 +217,57 @@
     "phase": "Complete implementation and authorized final verification; final documentation/state release commit and push by DocsSkill",
     "protocol": "Official SDK framing; distinguish latest 2026-07-28 stateless transport from legacy 2025-11-25 session compatibility; no unverified universal-client claim",
     "security": "BROWSER_MCP_TOKEN required; Host and Origin validation, request bounds, bounded ownership/idle lifetime; browser and native consent live on server host; never expose CDP",
-    "preserved": ["doc.md", "existing stdio default", "CLI JSONL", "OMP extension stdio worker", "native consent", "host-generated exact approval tokens"],
+    "preserved": [
+      "doc.md",
+      "existing stdio default",
+      "CLI JSONL",
+      "OMP extension stdio worker",
+      "native consent",
+      "host-generated exact approval tokens"
+    ],
     "verification": "Main-authorized unified suite81 passed in165.02s (wall166.54s) Python3.13.12/pytest9.1.1, all9files no reported skips/failures. uv build succeeded1.61s; sdist portable skill and wheel snapshot.js/HTTP module/entrypoints inspected. Clean installed-wheel HTTP-extra CLI doctor and actual HTTP startup+official SDK modern2026-07-28/legacy2025-11-25 tools15/doctor/instructions passed outside checkout. Skills-ref, structural21local links, guarded install and actual installed Codex skills/list passed without paid turn.",
-    "git_evidence": [{"commit":"d2dd45e96ddfa2d5ef9a8c02d400764b4ad2bb10","feature":"portable skill","push":"origin/main successful"},{"commit":"e01f349f91084b4208e6fae4be8bf064e54fc09b","feature":"HTTP/client deployment documentation","push":"origin/main successful"},{"commit":"25e4095db09e87d5b52d03880f78057a6b18dd41","feature":"HTTP dual-era transport exact handed-off paths","push":"origin/main successful"},{"commit":"d8458bfb9f9e5076971a742f12672614eaaabaf2","feature":"skill validator/actual Codex discovery evidence","push":"origin/main successful"},{"commit":"c5b8c9347bc5cb9aac00fef407addb28996deac8","feature":"HTTP fixture repair and scoped evidence","push":"origin/main successful"}],
-    "artifacts": {"unified":"/tmp/browser-http-final-proof/","installed_wheel":"/tmp/browser-http-installed-wheel-proof.json","codex_discovery":"/tmp/browser-skill-proof-qjbtxeun/skills-list.json","sdist_sha256":"8263d8b25ba7ea0d7b4091b540f84fe53805b7dd9f252ca0b4df08124a163d1c","wheel_sha256":"a320ae9089846ae47cd4b83fa063d58668790465907adc72ac5aaa5ed632aca7"},
-    "limits": ["No live Luna/provider or paid Codex/Claude HTTP model turn", "No personal logged-in Chrome/native consent dialog or headed desktop", "No installed-wheel browser launch", "Actual localhost two-hop HTTP relay is not nginx/TLS/public deployment", "Claude/Hermes skill discovery documentation-based", "No Facebook or matched competitor benchmark"],
+    "git_evidence": [
+      {
+        "commit": "d2dd45e96ddfa2d5ef9a8c02d400764b4ad2bb10",
+        "feature": "portable skill",
+        "push": "origin/main successful"
+      },
+      {
+        "commit": "e01f349f91084b4208e6fae4be8bf064e54fc09b",
+        "feature": "HTTP/client deployment documentation",
+        "push": "origin/main successful"
+      },
+      {
+        "commit": "25e4095db09e87d5b52d03880f78057a6b18dd41",
+        "feature": "HTTP dual-era transport exact handed-off paths",
+        "push": "origin/main successful"
+      },
+      {
+        "commit": "d8458bfb9f9e5076971a742f12672614eaaabaf2",
+        "feature": "skill validator/actual Codex discovery evidence",
+        "push": "origin/main successful"
+      },
+      {
+        "commit": "c5b8c9347bc5cb9aac00fef407addb28996deac8",
+        "feature": "HTTP fixture repair and scoped evidence",
+        "push": "origin/main successful"
+      }
+    ],
+    "artifacts": {
+      "unified": "/tmp/browser-http-final-proof/",
+      "installed_wheel": "/tmp/browser-http-installed-wheel-proof.json",
+      "codex_discovery": "/tmp/browser-skill-proof-qjbtxeun/skills-list.json",
+      "sdist_sha256": "8263d8b25ba7ea0d7b4091b540f84fe53805b7dd9f252ca0b4df08124a163d1c",
+      "wheel_sha256": "a320ae9089846ae47cd4b83fa063d58668790465907adc72ac5aaa5ed632aca7"
+    },
+    "limits": [
+      "No live Luna/provider or paid Codex/Claude HTTP model turn",
+      "No personal logged-in Chrome/native consent dialog or headed desktop",
+      "No installed-wheel browser launch",
+      "Actual localhost two-hop HTTP relay is not nginx/TLS/public deployment",
+      "Claude/Hermes skill discovery documentation-based",
+      "No Facebook or matched competitor benchmark"
+    ],
     "release_commit": "Exact final docs/state commit and successful push result reported in DocsSkill handoff; self-hash cannot be embedded in its own content"
   },
   "agent_install_feature": {
@@ -171,8 +281,82 @@
     "early_commit": "3f3cfc5d9a7eec1480c513decae53671c10c813c",
     "early_push": "origin/main successful",
     "verification": "Complete isolated HOME/CODEX_HOME remote clone installation proof passed10.98s: exact published SDK stdio2025-06-18 tools15/doctor, actual Codex user skill discovery, HTTP2026-07-28 tools15/doctor with token-env config; idempotent env/config/link and unrelated/foreign config/checkout/skill preservation. Exact existing .env/token published snippets additionally passed0.55s retained0600 bytes.",
-    "artifacts": ["/tmp/browser-agent-install-fmtf6879/report.json", "/tmp/browser-agent-install-fmtf6879/skills-list.json", "/tmp/browser-agent-install-fmtf6879/private-file-rerun.json"],
+    "artifacts": [
+      "/tmp/browser-agent-install-fmtf6879/report.json",
+      "/tmp/browser-agent-install-fmtf6879/skills-list.json",
+      "/tmp/browser-agent-install-fmtf6879/private-file-rerun.json"
+    ],
     "final_commit_reference": "Exact final evidence commit and successful origin/main push are reported in SetupProof handoff; self-hash cannot be embedded in own content."
   },
-  "resume": "Re-read AGENTS.md, this file, own state, and current owned source; retain scope/research/security/verification/commit rules."
+  "resume": "Re-read AGENTS.md, this file, own state, and current owned source; retain scope/research/security/verification/commit rules.",
+  "release_issues_2026_10_09": {
+    "phase": "implementation; no checks authorized yet",
+    "tracker": "agents/release-issues.json",
+    "ownership": {
+      "BrowserCore": [
+        "src/browser_automation/browser.py",
+        "src/browser_automation/snapshot.js",
+        "browser/context tests",
+        "agents/browser-core.json"
+      ],
+      "Traffic": [
+        "src/browser_automation/browser_monitor.py",
+        "tests/test_browser_monitor.py",
+        "agents/traffic.json"
+      ],
+      "DecisionState": [
+        "src/browser_automation/page_state.py",
+        "src/browser_automation/providers.py",
+        "src/browser_automation/agent.py",
+        "agent/provider/state tests",
+        "agents/decision-state.json"
+      ],
+      "Surface": [
+        "src/browser_automation/service.py",
+        "src/browser_automation/cli.py",
+        "src/browser_automation/mcp.py",
+        "src/browser_automation/mcp_http.py",
+        "integrations/omp/browser-tools.mjs",
+        "pyproject.toml",
+        "uv.lock",
+        ".env.example",
+        "service/stdio/HTTP/OMP tests",
+        "agents/surface.json"
+      ],
+      "ReleaseDocs": [
+        "README.md",
+        "CHANGELOG.md",
+        "install.md",
+        "docs/browser.md",
+        "docs/providers.md",
+        "docs/integrations.md",
+        "docs/http.md",
+        "docs/architecture.md",
+        "docs/research.md",
+        "skills/browser-automation/SKILL.md",
+        "agents/workstreams.json",
+        "agents/release-issues.json"
+      ]
+    },
+    "preserved": [
+      "doc.md",
+      "issues/01-protected-subframes.md",
+      "issues/02-youtube-empty-dom.md",
+      "issues/03-load-timeout.md",
+      "issues/04-refresh-policy.md",
+      "issues/05-network.md",
+      "issues/06-websocket.md",
+      "issues/07-animated-visual.md",
+      "issues/08-parent-state.md"
+    ],
+    "rules": [
+      "Tester observations are ground truth; do not repeat original failures to confirm.",
+      "All workers READY before parent authorizes scoped checks; no mid-flight tests/build/lint/format.",
+      "After scoped PASS and stable source, ReleaseDocs runs authorized global suite/build/installed-wheel real-browser smoke.",
+      "Real Chromium consumer evidence and independent screenshot review required, tests alone not proof.",
+      "No native personal-profile or paid provider credentials currently available; deterministic HTTP providers must be labeled.",
+      "Commit feature-sized implementation milestones first, review fixes then evidence; exact owned paths only.",
+      "No secrets/profiles/private screenshots in Git; no live FB/TikTok/macOS/YouTube claim without actual evidence."
+    ]
+  }
 }

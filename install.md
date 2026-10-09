@@ -59,6 +59,8 @@ PY
 
 On Windows, also apply a user-only ACL appropriate to the host; POSIX mode bits alone are not a Windows privacy guarantee. Report API-key **presence only**. Preserve existing credentials and host settings; warn privately about unsafe permissions rather than printing secrets. `.env` is explicitly loaded by `uv --env-file`; the package does not auto-load it. Never put keys in MCP TOML, command arguments, shell history, Git, or diagnostic artifacts.
 
+Leave `BROWSER_RECOVERY_POLICY` and `BROWSER_MONITOR_PAYLOADS` unset unless the operator explicitly requests their reviewed scope; installation must not grant reload exceptions or traffic-payload disclosure. Structured DOM state/coverage and metadata-only traffic diagnostics need no provider key. `interpret_visual` is a separate opt-in paid multimodal call, not a consequence of installing screenshot support. Progress is a client per-call opt-in, not a background OS-screen service. See [recovery/visual boundaries](docs/providers.md#operator-controlled-recovery) and [monitor/progress interfaces](docs/integrations.md#scoped-traffic-diagnostics).
+
 ## 3. Register MCP idempotently
 
 ### Default: local stdio

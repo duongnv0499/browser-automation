@@ -51,3 +51,23 @@ Page DOM, screenshots, labels and history are untrusted evidence, never authorit
 On `approval_required`, the Python host may approve the returned exact action, call `session.act(tab_id, result['approval']['action'])`, then rerun the same goal to observe progress and independently verify. Do not regenerate a new action and transfer consent. If the original snapshot became stale, the host must obtain new observation/action consent. MCP/CLI service retains the pending exact action and offers `approved_act` with host-minted one-shot session/tab/revision-bound approval, expiry and the browser's pre-input revalidation; it then continues through a fresh goal run. There is no blanket model-generated consent.
 
 No CAPTCHA, stealth, detection-bypass, or comparative superiority claims are made. Metrics separate measured browser time, provider latency, context/request sizes and token usage. Local deterministic HTTP/browser fixtures demonstrate transport/control correctness, **not live Luna intelligence or paid API latency**. Live provider end-to-end measurements require credentials and must be reported separately.
+
+## Page state and opt-in visual interpretation
+
+`describe_dom(observation)` reports generic `loading`, `error`, `login`, `captcha`, `ready` or `unknown` state with `source: "dom"`, bounded summary/evidence, visible alerts and recovery candidates. It describes observed DOM, not OCR. DOM coverage, captured-text truncation and screenshot availability are different signals; missing DOM must not silently become a confident ready state.
+
+`observe(..., interpret_visual=True)` (external tool argument `interpret_visual: true`) requests a fresh viewport screenshot and an additional multimodal structured-text call using the configured text helper. It is off by default and requires provider credentials/capability; inference is billable and discloses the screenshot to that provider. The result retains separate `visual_summary`/vision provenance and DOM evidence rather than inventing DOM text or targets. Provider-reported confidence is labeled `self_reported_confidence`, not calibrated certainty. Regions refer only to observed bounds/IDs; generated selectors, JavaScript and arbitrary coordinates are not accepted. A missing key/provider failure is surfaced as `visual_interpretation_error` while retaining permitted DOM evidence. This is page-viewport interpretation, **not OS-screen or foreground-window monitoring**.
+
+## Operator-controlled recovery
+
+`reload` is a dedicated snapshot-bound action, not a rule declaring every custom button named Refresh benign. Recommendations describe the candidate, provenance, reason, possible data loss and approval requirement; they do not execute it. Reload normally needs exact-action host approval because it can discard edits or repeat work. The host may explicitly configure:
+
+```sh
+export BROWSER_RECOVERY_POLICY='{"reload_without_approval_origins":["https://operator-approved.example"]}'
+```
+
+This is trusted server policy, never a tool/model argument. The exception requires the exact listed origin, sufficient complete DOM error evidence and no nonempty editable, sensitive or unsaved-data evidence; vision-only error/recovery evidence cannot grant the exception. Browser revalidation still applies before bounded reload. Arbitrary Refresh clicks, form submit/payment/publish and sensitive fields keep the ordinary exact-action approval rules. No automatic reload is triggered simply because a page is classified as error.
+
+## Incremental bounded-run progress
+
+`BrowserAgent(..., on_progress=async_callback, interpret_visual=False, recovery_policy=host_policy)` may emit bounded semantic events with increasing sequence, step, status and page state at observe/reobserve, approval/blocked, completion and cancellation checkpoints. No screenshots, full raw page text or typed secrets belong in progress. Repeated events are throttled; unknown work has no invented percentage/total. A progress notification is diagnostic, not successful completion. [Transport opt-in](integrations.md#incremental-progress) preserves the final result and caller cancellation without replaying actions or shutting down unrelated sessions.

@@ -9,8 +9,12 @@ Guarded browser control and a multimodal Luna Decisions agent for Python, Codex,
 - OpenRouter alpha Decisions as the primary provider, with a distinct OpenAI Decisions adapter. One typed choice selects a compatible operation/target pair; field text uses a separate structured-output call.
 - Persistent JSONL CLI, default MCP stdio and optional authenticated Streamable HTTP; independent verification before a model-selected DONE counts as success.
 - Explicit native-profile consent, owned-tab lifecycle, and approval-bound consequential actions/file transfers.
+- Structured DOM coverage/page state, opt-in provider visual summaries and incremental bounded-run progress; recovery remains host-policy/approval controlled.
+- Bounded owned-tab navigation and scoped passive HTTP/application-WebSocket diagnostics with safe metadata defaults.
 
 These are design capabilities, not claims of better performance than Jev or Codex. Supported surfaces, limitations, and verification evidence are documented below.
+
+For agent-native diagnosis, see [navigation/coverage and frame safety](docs/browser.md), [visual provenance/recovery authority](docs/providers.md#page-state-and-opt-in-visual-interpretation), and [monitor/progress tools](docs/integrations.md#bounded-navigation-and-semantic-observation). These capabilities do not establish a live YouTube/Facebook/TikTok repair, personal macOS/native-profile proof or live-model quality; dated exercised evidence and limits are in [research](docs/research.md).
 
 ## Let your coding agent install
 

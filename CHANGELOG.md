@@ -2,6 +2,11 @@
 
 ## 0.1.0 — Unreleased
 
+- Add bounded navigation that preserves owned tabs on timeout, safe skipped-subframe diagnostics and independent DOM coverage; improve generic custom-element/shadow/display:contents collection without expanding protected-document authority.
+- Replace whole-viewport visual equality with exact target-local pixel guards while retaining semantic/geometry/occlusion checks and fail-closed changed-target diagnostics.
+- Add scoped bounded HTTP and application-WebSocket monitors with cursor/history metadata, HTTP status/failure distinction, true frame opcodes and safe metadata defaults; text payload capture requires explicit host-and-call opt-in.
+- Add DOM page-state/recovery recommendations, separate opt-in multimodal visual summaries, snapshot-bound host-controlled reload and incremental request-scoped progress through CLI/MCP/HTTP/OMP; retain exact consequential-action approvals and cancellation ownership.
+
 - Add an agent-followable `install.md` entrypoint and prominent natural-language installation prompt: configure the local stdio MCP and portable skill safely, preserve existing credentials/configuration, distinguish diagnostics from live-model/browser readiness, and make HTTP an explicit deployment choice rather than an installer daemon.
 - Verify the agent-install runbook from a fresh pushed checkout with isolated Codex home: exact published SDK stdio diagnostic, authenticated localhost HTTP doctor, actual Codex skill discovery, rerun idempotence and preservation conflicts; distinguish this cached-dependency command proof from autonomous model installation, browser readiness and paid-provider execution.
 
