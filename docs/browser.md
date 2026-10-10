@@ -85,6 +85,8 @@ Each exported target is hit-tested once at the act guard's default input point, 
 
 Bounds use top-level viewport CSS pixels. Frame metadata includes the document token and additive viewport offset. Rotated/scaled/transformed/zoomed iframe ancestors are omitted from DOM-coordinate control and reported in `limitations`; screenshot-bound visual targeting can still operate their rendered pixels. Offscreen/hidden/clipped-away frames do not advertise their controls. Scroll to reveal content and observe again.
 
+`observe(..., text_scope='document')` returns readable text of each observed document beyond the viewport: rendered text nodes with a nonempty box, not `visibility: hidden` and without a fully transparent ancestor, regardless of viewport or overflow clipping (so collapsed carousels or clipped panels can contribute text). Elements, targets and `rendered_text_nodes` stay viewport-bound, and the semantic digest still uses only viewport text, so offscreen text never makes a revision stale. Document text has its own budget within the 1,000,000-character collector limit; frames that are entirely outside the viewport are still skipped and reported in `limitations`. Exported elements may also carry `expanded` (`aria-expanded`), `selected` (`aria-selected="true"`) and `disabled` (`aria-disabled="true"`); these are informational and not part of the digest.
+
 Text is never silently cut: `truncated`, `text_length` and `next_offset` describe the cut. Retrieve the exact cached revision's remaining text with:
 
 ```python

@@ -179,7 +179,10 @@ async def test_mcp_official_client_real_browser(tmp_path, local_page):
             result, dragged = await call("observe", {**args, "screenshot": True})
             assert "Dragged SUCCESS" in dragged["text"]
             (tmp_path / "mcp-dragged.png").write_bytes(base64.b64decode(next(b["data"] for b in result["content"] if b["type"] == "image")))
-            select = next(e for e in dragged["elements"] if "select" in e["operations"] and e.get("multiple"))
+            # Default compact elements carry ops and non-default state such as multiple/options.
+            select = next(e for e in dragged["elements"] if "select" in e["ops"] and e.get("multiple"))
+            assert [o["value"] for o in select["options"]] == ["a", "b"] and all(o.get("selected") for o in select["options"])
+            assert not any(key in element for element in dragged["elements"] for key in ("bounds", "frame", "signature", "operations"))
             await call("act", {**args, "action": {"observation_id": dragged["id"], "operation": "select", "target": select["id"], "value": []}})
             result, cleared = await call("observe", {**args, "screenshot": True})
             assert "Selection cleared" in cleared["text"]

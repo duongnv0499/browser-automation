@@ -35,7 +35,7 @@ def test_bounded_surface_contracts():
 async def test_reload_approval_binding_preserves_recovery_warning():
     from test_service import service_with_session
     service, session = service_with_session()
-    observed = await service.dispatch("observe", {"session_id": "s", "tab_id": "t"})
+    observed = await service.dispatch("observe", {"session_id": "s", "tab_id": "t", "detail": "full"})
     paused = await service.dispatch("act", {"session_id": "s", "tab_id": "t", "action": {"observation_id": observed["id"], "operation": "reload"}})
     binding = paused["binding"]
     assert binding["recovery"] == observed["page_state"]["recovery_candidates"]

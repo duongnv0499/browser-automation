@@ -153,7 +153,8 @@ class BrowserService:
                 if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100000:
                     raise ServiceError("invalid_argument", "max_text must be 1..100000")
                 interpret_visual = args.get("interpret_visual", False)
-                observation = await browser.observe(args["tab_id"], screenshot=args.get("screenshot", False) or interpret_visual, max_text=limit)
+                scope = args.get("text_scope", "viewport")
+                observation = await browser.observe(args["tab_id"], screenshot=args.get("screenshot", False) or interpret_visual, max_text=limit, **({"text_scope": scope} if scope != "viewport" else {}))
                 from .page_state import compose_page_state
                 visual = None
                 if interpret_visual:
@@ -170,6 +171,8 @@ class BrowserService:
                             with anyio.move_on_after(5, shield=True):
                                 await provider.close()
                 observation["page_state"] = compose_page_state(observation, visual=visual, policy=self.recovery_policy)
+                # The cache always keeps the FULL observation: approval classification
+                # needs href/form/submit metadata that compact output omits.
                 full = dict(observation)
                 full.pop("screenshot", None)
                 key = (sid, observation["id"])
@@ -177,7 +180,9 @@ class BrowserService:
                 self.snapshots.move_to_end(key)
                 while len(self.snapshots) > 8:
                     self.snapshots.popitem(last=False)
-                return observation
+                if args.get("detail", "compact") == "full":
+                    return observation
+                return compact_observation(observation, visual_regions=args.get("visual_regions", False))
             if command == "text":
                 snapshot = self.snapshots.get((sid, args["observation_id"]))
                 if snapshot is None:
@@ -290,6 +295,8 @@ class BrowserService:
                         result["host_approval"] = {"binding": binding, "expires_at": expiry,
                             "host_command": "browser-agent approve --binding-file binding.json --approval-file /path/to/approvals.json",
                             "resume_tool": "approved_act"}
+                    if args.get("detail", "compact") != "full" and isinstance(result.get("observation"), dict):
+                        result["observation"] = compact_observation(result["observation"])
                     return result
                 finally:
                     with anyio.move_on_after(5, shield=True):
@@ -361,6 +368,75 @@ class BrowserService:
             self.locks.clear()
             if failures:
                 raise ExceptionGroup("Browser cleanup failures", failures)
+
+
+_VALUE_INPUT_TYPES_EXCLUDED = {"checkbox", "radio", "submit", "button", "reset", "image", "file", "hidden"}
+
+
+def compact_observation(observation: dict, *, visual_regions: bool = False) -> dict:
+    """Agent-facing observation: same revision/target IDs, without geometry, frames or signatures.
+
+    Only non-default element state is included. Screenshot-grid targets stay valid in the
+    engine but are listed only with visual_regions=True. Use detail="full" for bounds.
+    """
+    compact = {key: observation[key] for key in ("id", "tab_id", "url", "title", "text", "truncated", "next_offset", "text_length") if key in observation}
+    coverage = observation.get("coverage")
+    if isinstance(coverage, dict):
+        compact["coverage"] = {"status": coverage.get("status", "unknown")}
+        if coverage.get("status") == "partial":
+            compact["coverage"]["reasons"] = list(coverage.get("reasons", []))
+    page_state = observation.get("page_state")
+    if isinstance(page_state, dict):
+        compact["page_state"] = {key: page_state[key] for key in ("state", "summary", "source") if key in page_state}
+    if observation.get("visible_alerts"):
+        compact["visible_alerts"] = [{"role": alert.get("role"), "text": alert.get("text")} for alert in observation["visible_alerts"]]
+    for key in ("screenshot_status", "screenshot", "diagnostic", "visual_summary", "visual_interpretation_error"):
+        if key in observation:
+            compact[key] = observation[key]
+    compact["omitted_elements"] = observation.get("omitted_elements", 0)
+    compact["limitations"] = len(observation.get("limitations") or [])
+    elements, hidden_regions = [], 0
+    page = urlsplit(str(observation.get("url") or ""))
+    origin = f"{page.scheme}://{page.netloc}" if page.scheme in {"http", "https"} and page.netloc else None
+    for element in observation.get("elements", []):
+        role = element.get("role")
+        if role == "visual-region" and not visual_regions:
+            hidden_regions += 1
+            continue
+        operations = list(element.get("operations") or [])
+        name = str(element.get("name") or "")
+        if not operations and not name:
+            continue
+        item = {"id": element.get("id"), "role": role, "name": name[:120], "ops": operations}
+        value = element.get("value")
+        if value not in (None, "") and element.get("tag") in {"input", "textarea", "select"} and element.get("input_type") not in _VALUE_INPUT_TYPES_EXCLUDED:
+            item["value"] = str(value)[:200]
+        for flag in ("checked", "selected", "disabled", "covered", "sensitive", "multiple"):
+            if element.get(flag) is True:
+                item[flag] = True
+        if isinstance(element.get("expanded"), bool):
+            item["expanded"] = element["expanded"]
+        if role == "link" and element.get("href"):
+            href = str(element["href"])
+            # Same-origin links as origin-relative paths (lossless against `url`): the
+            # repeated origin was the largest remaining compact contributor on real pages.
+            if origin and href.startswith(origin + "/"):
+                href = href[len(origin):]
+            item["href"] = href[:200]
+        options = element.get("options") or []
+        if options:
+            item["options"] = [{"value": str(option.get("value", ""))[:200],
+                                **({"label": str(option["label"])[:80]} if option.get("label") and option.get("label") != option.get("value") else {}),
+                                **({"selected": True} if option.get("selected") else {}),
+                                **({"disabled": True} if option.get("disabled") else {})} for option in options[:20]]
+            omitted = max(0, len(options) - 20) + int(element.get("omitted_options") or 0)
+            if omitted:
+                item["omitted_options"] = omitted
+        elements.append(item)
+    compact["elements"] = elements
+    if hidden_regions:
+        compact["visual_regions_omitted"] = hidden_regions
+    return compact
 
 
 def error_payload(exc: Exception) -> dict:

@@ -851,9 +851,11 @@ class BrowserSession:
         return await page.screenshot(type='png', full_page=False, mask=masks)
 
 
-    async def observe(self, tab_id: str, screenshot: bool = False, max_text: int = 12000) -> dict[str, Any]:
+    async def observe(self, tab_id: str, screenshot: bool = False, max_text: int = 12000, text_scope: str = 'viewport') -> dict[str, Any]:
         if not isinstance(max_text, int) or not 0 <= max_text <= 1_000_000:
             raise BrowserError('max_text must be between 0 and 1000000')
+        if text_scope not in ('viewport', 'document'):
+            raise BrowserError('text_scope must be viewport or document')
         async with self._lock:
             page = self._page(tab_id)
             revision = uuid.uuid4().hex
@@ -874,15 +876,18 @@ class BrowserSession:
                 source_truncated = True
             total_elements_budget = 2000
             total_text_budget = 1000000
+            viewport_chars = 0
             omitted_elements = 0
             for index, frame in enumerate(frames):
                 if not self._frame_allowed(frame):
                     continue
                 try:
                     ox, oy, clip = await self._frame_geometry(frame)
-                    remaining_text = max(0, total_text_budget - sum(len(s) for s in sections))
+                    # Viewport text feeds the semantic digest; document text has its own budget.
+                    remaining_text = max(0, total_text_budget - viewport_chars)
+                    remaining_document = max(0, total_text_budget - sum(len(s) for s in sections))
                     remaining_elements = max(0, total_elements_budget - len(elements))
-                    data = await self._eval(frame,self._script, {'clip':{'left':clip['left']-ox,'right':clip['right']-ox,'top':clip['top']-oy,'bottom':clip['bottom']-oy},'max_text_chars':remaining_text,'max_elements':remaining_elements,'max_nodes':20000})
+                    data = await self._eval(frame,self._script, {'clip':{'left':clip['left']-ox,'right':clip['right']-ox,'top':clip['top']-oy,'bottom':clip['bottom']-oy},'max_text_chars':remaining_text,'max_elements':remaining_elements,'max_nodes':20000,'text_scope':text_scope,'max_document_chars':remaining_document})
                 except PlaywrightError:
                     limitations.append({'frame': index, 'reason': 'detached or unavailable frame'})
                     continue
@@ -907,7 +912,9 @@ class BrowserSession:
                     visible_alerts.append({**alert, 'bounds': bounds, 'frame_id': frame.frame_id})
                 omitted_elements += data.get('omitted_elements', 0)
                 documents.append((frame, data['document'], self._semantic_digest(data)))
-                sections.append(f"[frame {index}: {data['url']}]\n{data['text']}")
+                header = f"[frame {index}: {data['url']}]\n"
+                viewport_chars += len(header) + len(data['text'])  # identical to the viewport-only budget
+                sections.append(header + (data['document_text'] if text_scope == 'document' else data['text']))
                 for element in data['elements']:
                     local = element['id']
                     public = f"f{data['document']}:{local}"

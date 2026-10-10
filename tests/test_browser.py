@@ -36,6 +36,17 @@ OVERLAY_FIXTURE = b'''<!doctype html><html><head><title>Overlay fixture</title><
 </body></html>'''
 
 
+LONG_FIXTURE = b'''<!doctype html><html><head><title>Long fixture</title></head><body style="font:18px sans-serif;margin:10px">
+<h1>Top heading</h1><button aria-expanded="false" onclick="this.setAttribute('aria-expanded','true')">Menu toggle</button>
+<div style="height:3000px">Spacer</div>
+<p>Deep footer sentence beyond the viewport.</p><p style="opacity:0">Transparent hidden sentence</p><p style="display:none">Display none sentence</p>
+<button>Bottom button</button>
+</body></html>'''
+MANY_FIXTURE = ('<!doctype html><html><head><title>Many fixture</title><style>body{font:11px sans-serif;margin:4px}a{margin:1px}</style></head><body>'
+                + ''.join(f'<a href="/item/{n}">Item {n}</a>' for n in range(150))
+                + '<label>Pick <select><option value="x">X</option><option value="y" selected>Y</option></select></label><input type="password" aria-label="Secret" value="hidden-value"></body></html>').encode()
+
+
 @pytest_asyncio.fixture
 async def site():
     port = 0
@@ -66,6 +77,10 @@ async def site():
                 body = b'<html><body><button onclick="this.textContent=\'Frame clicked\'">Frame button</button></body></html>'
             elif route == '/popup':
                 body = b'<html><head><title>Owned popup</title></head><body>Popup opened</body></html>'
+            elif route == '/long':
+                body = LONG_FIXTURE
+            elif route == '/many':
+                body = MANY_FIXTURE
             elif route == '/overlay':
                 body = OVERLAY_FIXTURE
             elif route == '/nav':
@@ -398,6 +413,68 @@ async def test_wrapped_inline_link_uses_fragment_input_point(browser, site):
     result = await session.act(tab, {'operation': 'click', 'observation_id': observation['id'], 'target': link['id']})
     assert result['navigation']['url'].endswith('#wrapped')
     assert await page.locator('#out').inner_text() == 'Wrapped clicked'
+
+
+@pytest.mark.asyncio
+async def test_document_text_scope_reads_beyond_viewport_without_digest_change(browser, site):
+    session, tab = browser
+    await session.navigate(tab, site + 'long')
+    viewport = await session.observe(tab)
+    assert 'Top heading' in viewport['text'] and 'Deep footer sentence' not in viewport['text']
+    document = await session.observe(tab, text_scope='document', max_text=1_000_000)
+    assert 'Deep footer sentence beyond the viewport.' in document['text'] and 'Top heading' in document['text']
+    assert 'Transparent hidden sentence' not in document['text'] and 'Display none sentence' not in document['text']
+    names = {e['name'] for e in document['elements']}
+    assert 'Menu toggle' in names and 'Bottom button' not in names  # elements stay viewport-bound
+    assert element(document, 'Menu toggle')['expanded'] is False
+    # Offscreen text must not make the revision stale; continuation reads the document text.
+    await session.check_observation(tab, document['id'])
+    small = await session.observe(tab, text_scope='document', max_text=20)
+    assert small['truncated'] and small['next_offset'] == 20
+    rest = await session.text_continuation(tab, small['id'], 20, 1_000_000)
+    assert 'Deep footer sentence' in rest['text']
+    await session.act(tab, {'operation': 'wait', 'seconds': 0, 'observation_id': small['id']})
+    with pytest.raises(BrowserError):
+        await session.observe(tab, text_scope='page')
+
+
+@pytest.mark.asyncio
+async def test_service_compact_observation_is_smaller_and_actionable(site):
+    from browser_automation.service import BrowserService
+    service = BrowserService()
+    try:
+        sid = (await service.dispatch('launch', {'headless': True}))['session_id']
+        tab = (await service.dispatch('new_tab', {'session_id': sid, 'url': site + 'many'}))['tab']['id']
+        args = {'session_id': sid, 'tab_id': tab}
+        full = await service.dispatch('observe', {**args, 'detail': 'full'})
+        compact = await service.dispatch('observe', args)
+        assert {'bounds', 'frame'} <= set(full['elements'][0]) and 'safety' in full
+        assert set(compact) <= {'id', 'tab_id', 'url', 'title', 'text', 'truncated', 'next_offset', 'text_length', 'coverage', 'page_state', 'visible_alerts', 'screenshot_status', 'screenshot', 'diagnostic', 'visual_summary', 'visual_interpretation_error', 'omitted_elements', 'limitations', 'elements', 'visual_regions_omitted'}
+        assert not any(key in e for e in compact['elements'] for key in ('bounds', 'frame', 'signature', 'operations', 'tag', 'input_type'))
+        assert len(compact['elements']) == len(full['elements']) >= 150
+        full_size, compact_size = len(json.dumps(full, separators=(',', ':'))), len(json.dumps(compact, separators=(',', ':')))
+        assert compact_size <= 0.35 * full_size, (compact_size, full_size)
+        link = next(e for e in compact['elements'] if e['name'] == 'Item 7')
+        assert link == {'id': link['id'], 'role': 'link', 'name': 'Item 7', 'ops': ['click', 'hover', 'press', 'drag'], 'href': '/item/7'}  # links are natively draggable; same-origin href is a path
+        select = next(e for e in compact['elements'] if 'select' in e['ops'])
+        assert select['value'] == 'y' and select['options'] == [{'value': 'x', 'label': 'X'}, {'value': 'y', 'label': 'Y', 'selected': True}]
+        secret = next(e for e in compact['elements'] if e['name'] == 'Secret')
+        assert secret['sensitive'] is True and 'hidden-value' not in json.dumps(compact)
+        # IDs from compact output act unchanged; the cache keeps full data for approval policy.
+        assert service.snapshots[(sid, compact['id'])]['elements'][0].get('bounds')
+        await service.dispatch('act', {**args, 'action': {'observation_id': compact['id'], 'operation': 'select', 'target': select['id'], 'value': 'x'}})
+        after = await service.dispatch('observe', {**args, 'screenshot': True})
+        assert next(e for e in after['elements'] if 'select' in e['ops'])['value'] == 'x'
+        assert after['screenshot_status'] == 'captured' and after['visual_regions_omitted'] == 64
+        assert not any(e['role'] == 'visual-region' for e in after['elements'])
+        regions = await service.dispatch('observe', {**args, 'screenshot': True, 'visual_regions': True})
+        assert sum(e['role'] == 'visual-region' for e in regions['elements']) == 64 and 'visual_regions_omitted' not in regions
+        document = await service.dispatch('observe', {**args, 'text_scope': 'document', 'max_text': 5})
+        assert document['truncated'] and document['next_offset'] == 5
+        continued = await service.dispatch('text', {'session_id': sid, 'observation_id': document['id'], 'offset': 5})
+        assert 'Item 149' in continued['text']
+    finally:
+        await service.close()
 
 
 @pytest.mark.asyncio

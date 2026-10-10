@@ -36,11 +36,11 @@
  ],
  "features": {
   "F1": "COMMITTED 687cf22 (pushed)",
-  "F2": "VERIFIED_awaiting_GitOwner_commit",
-  "F3": "not_started",
+  "F2": "COMMITTED 481041a (pushed)",
+  "F3": "VERIFIED_awaiting_GitOwner_commit",
   "F4": "not_started"
  },
- "current_feature": "F2 observation accuracy (commit: fix(observe): reject stale approvals early and flag covered targets)",
+ "current_feature": "F3 compact observations (commit: feat(observe): compact observation output for agent clients)",
  "decisions": {
   "navigate_ownership": "BrowserSession.navigate accepts only pages in _owned (new_tab or popups of owned tabs) in both attached and isolated sessions; otherwise NotOwnedTabError(UnsafeActionError) code not_owned_tab, recommended_next_action new_tab",
   "navigate_url_rules": "Destination must pass BrowserSession._allowed_url (HTTP(S) with host or about:blank); service additionally applies web_url -> prohibited_url before any browser call",
@@ -56,7 +56,13 @@
   "f2_check_observation": "BrowserSession.check_observation(tab_id, observation_id, targets=()) under the lock: _snapshot + _validate incl. target-pixel comparison for visual targets among targets; no input. Service act calls it before minting approval_required; stale -> stale_observation, that observation and any pending for it removed from the service cache, no pending created. approved_act unchanged",
   "f2_covered": "snapshot.js clipRect() (refactor of visible() returning the clipped box) + one elementFromPoint at the guard's default point (center of clipped box) with shadow-root descent and composed contains, mirroring _GUARD. Covered exported targets keep name/signature/bounds but operations=[] and covered:true. Operations are already in _semantic_digest, so overlays appearing/disappearing invalidate older revisions; signature unchanged (no extra fingerprint cost). Provider choices come from operations, so covered targets are excluded without touching providers.py (not owned). Guard remains authoritative (explicit x/y in a partly covered target, parent-document iframe overlays). Cost: one hit test per exported element within the existing max_elements/max_nodes budgets",
   "f2_behavior_change": "An overlay appearing after observe now fails act as stale_observation (digest) instead of unsafe_action 'covered target'; test_stale_covered_wrong_tab_and_semantic_guards updated and a corner-overlay explicit-point case keeps proving the guard",
-  "f2_input_point": "Verification found wrapped inline links (Wikipedia) flagged covered because the guard's default point was the bounding-box center (on unrelated paragraph text); this was also a pre-existing guard false rejection. snapshot.js now defines state.inputPoint(el, clippedBox) = center of the largest visible getClientRects() fragment (<=64 fragments; single-fragment elements unchanged), used by both the covered flag and _GUARD's default point. Explicit x/y points unchanged"
+  "f2_input_point": "Verification found wrapped inline links (Wikipedia) flagged covered because the guard's default point was the bounding-box center (on unrelated paragraph text); this was also a pre-existing guard false rejection. snapshot.js now defines state.inputPoint(el, clippedBox) = center of the largest visible getClientRects() fragment (<=64 fragments; single-fragment elements unchanged), used by both the covered flag and _GUARD's default point. Explicit x/y points unchanged",
+  "f3_compact": "service.compact_observation(observation, visual_regions=False): top level id, tab_id, url, title, text, truncated, next_offset, text_length, coverage{status,+reasons if partial}, page_state{state,summary,source}, visible_alerts[{role,text}], screenshot_status, screenshot (moved to MCP image block as before), diagnostic, visual_summary/visual_interpretation_error when present, omitted_elements, limitations (count), elements, visual_regions_omitted (count, only when >0). Element {id, role, name[:120], ops} + non-default value (input/textarea/select excluding checkbox/radio/button-like/file/hidden, <=200), checked/selected/disabled/covered/sensitive/multiple (true only), expanded (bool when aria-expanded present), href (links <=200), options (<=20 {value,label if different,selected,disabled} + omitted_options). Drops elements with no ops and no name",
+  "f3_cache": "Service cache stores the FULL observation (minus screenshot) regardless of detail; approval classification unchanged",
+  "f3_full": "detail=full returns the unmodified observation; only additive optional element fields expanded/selected/disabled (from aria-*) were added in snapshot.js and are not in the digest",
+  "f3_text_scope": "snapshot.js option text_scope=document collects document_text (readable: nonempty text box, not visibility:hidden, no opacity-0 ancestor via memoized walk) with its own max_document_chars budget; viewport text and its budget (incl. frame headers) unchanged so _semantic_digest/_validate never see offscreen text. BrowserSession.observe(text_scope) uses document text for sections/snapshot text, so text continuation works. Offscreen iframes still skipped (limitations)",
+  "f3_run": "run result.observation compacted after the paused-run cache insertion unless detail=full",
+  "f3_href": "Real-page check: compact was 36.1% (HN) / 34.6% (Wikipedia) of full; dominant element bytes were href (absolute same-origin URLs), id, ops. Same-origin link hrefs are now emitted origin-relative ('/item?id=..', lossless against observation url) -> 31.9% / 31.3%. Remaining: ids (f+32-hex document token+':n', engine contract/security token, unchanged) and ops (real capabilities, e.g. native link drag), not treated as noise"
  },
  "research": [
   {
@@ -102,9 +108,24 @@
    "docs/browser.md",
    "docs/integrations.md",
    "agents/autonomy.json"
+  ],
+  "F3": "implemented and verified 2026-10-10",
+  "F3_changed": [
+   "src/browser_automation/snapshot.js",
+   "src/browser_automation/browser.py",
+   "src/browser_automation/service.py",
+   "src/browser_automation/mcp.py",
+   "integrations/omp/browser-tools.mjs",
+   "tests/test_browser.py",
+   "tests/test_service.py",
+   "tests/test_service_stdio.py",
+   "tests/test_agent_surface.py",
+   "docs/browser.md",
+   "docs/integrations.md",
+   "agents/autonomy.json"
   ]
  },
- "requested_verification": "F2 done; next verification after F3 implementation",
+ "requested_verification": "F3 done; next verification after F4 implementation",
  "blockers": [],
  "verification": {
   "F1": {
@@ -171,6 +192,65 @@
      "remaining_covered": "link 'HTTP' whose only visible fragment is a 0.53px sliver at the 720px viewport bottom edge; elementFromPoint returns null there and the act guard also rejects it ('covered target'); scrolling is required anyway"
     },
     "latency_kind": "browser-only DOM observe without screenshot; public sites, single run, network variance not controlled"
+   }
+  },
+  "F3": {
+   "date": "2026-10-10",
+   "environment": "macOS, Python 3.13 .venv, playwright 1.63.0, headless isolated Chromium; no native user Chrome, no live provider",
+   "suite": {
+    "command": "BROWSER_PROOF_DIR=/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/proof-f3 BROWSER_INTEGRATION_TESTS=1 uv run --extra http pytest tests/test_browser.py tests/test_browser_visual.py tests/test_browser_observation.py tests/test_browser_context.py tests/test_page_state.py tests/test_agent.py tests/test_agent_surface.py tests/test_service.py tests/test_service_stdio.py tests/test_mcp_http_browser.py tests/test_network_surface.py --basetemp=/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/f3 -p no:cacheprovider",
+    "first_run": "1 failed, 164 passed (86.67s): my compact link assertion omitted the native 'drag' op on links; test expectation corrected",
+    "final": "165 passed, 0 failed, 92.49s (after href relativization)"
+   },
+   "screenshot_viewed": "/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/proof-f3/real-1.png (Wikipedia Web_browser viewport, compact screenshot observe)",
+   "real_pages": {
+    "script": "/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/f3_real_pages.py (in-process BrowserService, headless launch; JSON bytes with compact separators, screenshot base64 excluded)",
+    "hacker_news": {
+     "full_bytes": 84122,
+     "compact_bytes": 26805,
+     "ratio": 0.319,
+     "with_screenshot_grid_full_bytes": 101309,
+     "with_screenshot_compact_bytes": 26864,
+     "elements": 147,
+     "viewport_text_chars": 2622,
+     "document_text_length": 4156,
+     "observe_ms": {
+      "full": 54.0,
+      "compact": 33.4,
+      "document": 35.5
+     }
+    },
+    "wikipedia": {
+     "full_bytes": 38975,
+     "compact_bytes": 12201,
+     "ratio": 0.313,
+     "with_screenshot_grid_full_bytes": 56164,
+     "with_screenshot_compact_bytes": 12260,
+     "elements": 66,
+     "viewport_text_chars": 1615,
+     "document_text_length": 20798,
+     "observe_ms": {
+      "full": 77.6,
+      "compact": 64.8,
+      "document": 69.6
+     }
+    },
+    "compact_element_bytes_top": {
+     "hacker_news": {
+      "id": 6360,
+      "ops": 5562,
+      "href": 5351,
+      "name": 3287
+     },
+     "wikipedia": {
+      "id": 2829,
+      "ops": 2340,
+      "href": 1942,
+      "name": 1582
+     }
+    },
+    "stale_observations": "Intermittently (2 of ~30 runs) a screenshot observe shortly after Wikipedia load raised stale_observation from the existing screenshot self-validation (page still changing asynchronously; infobox image visibly unloaded in screenshot). Not reproduced in 16 targeted repeats; behaviour is the pre-existing fail-closed check, retried once by the measurement script",
+    "latency_kind": "browser+service in-process observe, single run each on public sites; network variance uncontrolled"
    }
   }
  }

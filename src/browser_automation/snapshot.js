@@ -12,6 +12,10 @@
   const maxTextChars = options.max_text_chars ?? 1000000;
   const maxElements = options.max_elements ?? 2000;
   const maxNodes = options.max_nodes ?? 20000;
+  // Optional readable-document text beyond the viewport. Viewport `text` (which feeds
+  // the semantic digest) and element collection stay viewport-bound either way.
+  const documentScope = options.text_scope === 'document';
+  const maxDocumentChars = options.max_document_chars ?? maxTextChars;
   const clipsOverflow = el => {
     const s=getComputedStyle(el), root=document.documentElement;
     if(el===root || s.display==='contents' || s.display==='inline') return false;
@@ -97,7 +101,19 @@
     return raw.length > 200 ? `${raw.slice(0, 100)}...len:${raw.length}:h:${fastHash(raw)}` : raw;
   };
   state.fingerprint = el => JSON.stringify([el.tagName,el.type||el.getAttribute('type'),el.getAttribute('role'),label(el),fieldValue(el),el.href||'',el.form?.action||'',el.form?.method||'',el.getAttribute('formaction'),el.getAttribute('formmethod'),el.disabled,el.readOnly,el.multiple,el.checked]);
-  const elements = [], text = [], live = new Map(), fields = [];
+  const elements = [], text = [], live = new Map(), fields = [], documentText = [];
+  let documentChars = 0;
+  const transparent = new WeakMap();
+  const opacityZero = el => {
+    if(!el || el.nodeType !== Node.ELEMENT_NODE) return false;
+    if(transparent.has(el)) return transparent.get(el);
+    const result = Number(getComputedStyle(el).opacity) === 0 || opacityZero(el.parentElement || el.getRootNode().host);
+    transparent.set(el, result);
+    return result;
+  };
+  // Rendered text regardless of viewport/overflow clipping: a nonempty box (display:none
+  // subtrees have none), not visibility:hidden, and no fully transparent ancestor.
+  const readable = (el, rect) => rect.width > 0 && rect.height > 0 && getComputedStyle(el).visibility !== 'hidden' && !opacityZero(el);
   const visibleAlerts = [];
   let visitedNodes = 0, textChars = 0, sourceTruncated = false, omittedElements = 0;
   let editableNonempty = false, sensitiveFields = false, renderedTextNodes = 0;
@@ -162,6 +178,10 @@
             elements.push({id,signature:state.fingerprint(el),role,name:label(el),value:sensitive(el)?'[REDACTED]':String(el.value || '').slice(0,1000),operations:[...new Set(ops)],bounds:{x:r.x,y:r.y,width:r.width,height:r.height},sensitive:sensitive(el),input_type:tag==='button'?(el.type||'submit'):(el.type||type),is_submit:isSub,tag,href:el.href||null,form_action:el.hasAttribute('formaction')?el.formAction:el.form?.action||null,form_method:el.hasAttribute('formmethod')?el.formMethod:el.form?.method||null,multiple:tag==='select'?!!el.multiple:(tag==='input'&&type==='file')?!!el.multiple:false,options:opts,omitted_options:Math.max(0, rawOpts.length - maxOpts),selected_values:tag==='select'?Array.from(el.selectedOptions||[]).map(o=>o.value):undefined});
             if(['checkbox','radio'].includes(type)) elements.at(-1).checked = !!el.checked;
             if(isCovered) elements.at(-1).covered = true;
+            const ariaExpanded = el.getAttribute('aria-expanded');
+            if(ariaExpanded === 'true' || ariaExpanded === 'false') elements.at(-1).expanded = ariaExpanded === 'true';
+            if(el.getAttribute('aria-selected') === 'true') elements.at(-1).selected = true;
+            if(el.getAttribute('aria-disabled') === 'true') elements.at(-1).disabled = true;
           } else {
             omittedElements++;
             sourceTruncated = true;
@@ -171,6 +191,17 @@
       // Text may render under a zero-box host even though that host is not a target.
       for (const node of el.childNodes) if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
           const range=document.createRange();range.selectNodeContents(node);const r=range.getBoundingClientRect();
+          if(documentScope && readable(el,r)) {
+            const str = node.textContent.trim();
+            if (documentChars + str.length <= maxDocumentChars) {
+              documentText.push(str);
+              documentChars += str.length;
+            } else {
+              if (documentChars < maxDocumentChars) documentText.push(str.slice(0, maxDocumentChars - documentChars));
+              documentChars = maxDocumentChars;
+              sourceTruncated = true;
+            }
+          }
           if(visible(el,r)) {
             renderedTextNodes++;
             const str = node.textContent.trim();
@@ -194,5 +225,7 @@
   };
   walk(document);
   state.nodes = live;
-  return {document:state.token,elements,omitted_elements:omittedElements,fields,text:text.join('\n'),source_truncated:sourceTruncated,viewport:{width:innerWidth,height:innerHeight},url:location.href,title:document.title,ready_state:document.readyState,editable_nonempty:editableNonempty,sensitive_fields:sensitiveFields,unsaved,visited_nodes:visitedNodes,rendered_text_nodes:renderedTextNodes,visible_alerts:visibleAlerts};
+  const result = {document:state.token,elements,omitted_elements:omittedElements,fields,text:text.join('\n'),source_truncated:sourceTruncated,viewport:{width:innerWidth,height:innerHeight},url:location.href,title:document.title,ready_state:document.readyState,editable_nonempty:editableNonempty,sensitive_fields:sensitiveFields,unsaved,visited_nodes:visitedNodes,rendered_text_nodes:renderedTextNodes,visible_alerts:visibleAlerts};
+  if(documentScope) result.document_text = documentText.join('\n');
+  return result;
 }

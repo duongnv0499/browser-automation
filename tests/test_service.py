@@ -289,3 +289,30 @@ async def test_paused_run_keeps_fresh_snapshot_and_pending_action(monkeypatch):
     assert result["host_approval"]["binding"]["observation_id"] == "fresh"
     assert set(service.snapshots) == {("s", "fresh")} and "screenshot" not in service.snapshots[("s", "fresh")]
     assert set(service.pending_actions) == {("s", "t", "fresh")}
+    assert result["observation"]["omitted_elements"] == 0 and result["observation"]["limitations"] == 0
+    full = await service.dispatch("run", {"session_id": "s", "tab_id": "t", "goal": "Pause for approval", "detail": "full"})
+    assert full["observation"] is paused_observation or full["observation"] == paused_observation
+
+
+@pytest.mark.asyncio
+async def test_observe_detail_and_visual_region_shapes():
+    service, session = service_with_session()
+    elements = [{"id": "f1:1", "role": "button", "name": "B" * 300, "value": "", "operations": ["click"], "bounds": {"x": 1}, "frame": {"index": 0}, "tag": "button", "input_type": "submit", "href": None},
+                {"id": "f1:2", "role": "textbox", "name": "Email", "value": "a@example.com", "operations": ["fill"], "tag": "input", "input_type": "email", "covered": True},
+                {"id": "f1:3", "role": "div", "name": "", "value": "", "operations": []},
+                {"id": "visual:0:0", "role": "visual-region", "name": "Screenshot region row 0 column 0", "value": "", "operations": ["click"]}]
+    async def observe(tab_id, screenshot=False, max_text=12000):
+        return {"id": "revision", "tab_id": tab_id, "url": "https://example.com", "title": "T", "text": "x", "text_length": 1, "truncated": False, "next_offset": None,
+                "elements": elements, "coverage": {"status": "complete", "reasons": [], "dom_elements": 3}, "limitations": [{"frame": 1}], "safety": {}, "omitted_elements": 0}
+    session.observe = observe
+    compact = await service.dispatch("observe", {"session_id": "s", "tab_id": "t"})
+    assert compact["coverage"] == {"status": "complete"} and compact["limitations"] == 1 and compact["visual_regions_omitted"] == 1
+    assert compact["elements"] == [{"id": "f1:1", "role": "button", "name": "B" * 120, "ops": ["click"]},
+                                   {"id": "f1:2", "role": "textbox", "name": "Email", "ops": ["fill"], "value": "a@example.com", "covered": True}]
+    assert service.snapshots[("s", "revision")]["elements"] == elements
+    regions = await service.dispatch("observe", {"session_id": "s", "tab_id": "t", "visual_regions": True})
+    assert regions["elements"][-1]["id"] == "visual:0:0" and "visual_regions_omitted" not in regions
+    full = await service.dispatch("observe", {"session_id": "s", "tab_id": "t", "detail": "full"})
+    assert full["elements"] == elements and full["safety"] == {}
+    with pytest.raises(ServiceError):
+        await service.dispatch("observe", {"session_id": "s", "tab_id": "t", "detail": "brief"})
