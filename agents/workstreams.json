@@ -401,6 +401,15 @@
         "owner": "Autonomy",
         "commit": "feat(policy): host approval modes for autonomous agents",
         "scope": "approval_policy.py; BROWSER_APPROVAL_MODE strict|standard|autonomous (default standard, invalid = clear error, doctor reports); tiers none|ordinary|consequential|critical; strict reproduces current behavior exactly; BROWSER_NETWORK_REQUIRE_APPROVAL=1 still forces network approval; approval {source host_policy|host_token, mode, tier, reason}",
+        "status": "committed cb059ae, pushed origin/main 2026-10-11",
+        "verification": "Autonomy macOS 2026-10-10/11: BROWSER_INTEGRATION_TESTS=1 uv run --extra http pytest tests --deselect tests/test_service_omp.py::test_actual_omp_extension_load -> 268 passed, 0 failed in 141.05s; after final link-tier cap, scoped rerun (test_approval_policy, test_agent, test_agent_surface, test_service, test_browser) -> 135 passed in 36.46s. Strict parity: frozen legacy classifier compared over ~40,500 cases. Wikipedia MCP stdio smoke in standard mode (fill + Enter search + content link click): 0 approval pauses in 3 runs; parent viewed wiki-after-link.png and autonomous-delete-proof.png",
+        "flake_observation": "First scoped rerun attempt had 1 CDP-connect timeout in test_browser test_attached_disconnect_preserves_user_tabs (path untouched by F4); passed alone and on rerun"
+      },
+      {
+        "id": "F4b",
+        "owner": "Autonomy",
+        "commit": "fix(observe): retry read-only revalidation while the page settles",
+        "scope": "Address intermittent stale_observation on screenshot observe while the page is still loading (F3 follow-up) by retrying read-only revalidation during settle; no input executed on stale data",
         "status": "pending"
       },
       {
@@ -491,9 +500,13 @@
       {
         "hash": "5aae8c3",
         "message": "feat(observe): compact observation output for agent clients"
+      },
+      {
+        "hash": "cb059ae",
+        "message": "feat(policy): host approval modes for autonomous agents"
       }
     ],
-    "status": "F3 committed 5aae8c3; F4 (host approval modes) pending",
+    "status": "F4 committed cb059ae; F4b (read-only revalidation retry) pending",
     "open_followups": [
       "Intermittent stale_observation (2/~30) on screenshot observe while Wikipedia still loading; pre-existing revalidation behaviour noted during F3 verification, tracked for follow-up"
     ]
@@ -506,7 +519,7 @@
   },
   "current_phase": {
     "feature": "autonomy round 2026-10-10",
-    "phase": "F3 committed 5aae8c3 and pushed; F4 (host approval modes) pending with Autonomy worker",
+    "phase": "F4 committed cb059ae and pushed; F4b (retry read-only revalidation while page settles) pending with Autonomy worker; then F5 release docs (Harness)",
     "active_section": "autonomy_round_2026_10_10",
     "active_tracker": "agents/autonomy.json",
     "historical_sections": "network_devtools_phase_2026_10_09 and earlier sections remain historical evidence, not acceptance of this round"
