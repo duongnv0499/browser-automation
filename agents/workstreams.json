@@ -410,7 +410,8 @@
         "owner": "Autonomy",
         "commit": "fix(observe): retry read-only revalidation while the page settles",
         "scope": "Address intermittent stale_observation on screenshot observe while the page is still loading (F3 follow-up) by retrying read-only revalidation during settle; no input executed on stale data",
-        "status": "pending"
+        "status": "committed 3e598bb, pushed origin/main 2026-10-11",
+        "verification": "Autonomy macOS 2026-10-11: 7-file scoped suite (test_browser, test_browser_visual, test_browser_observation, test_browser_context, test_service, test_service_stdio, test_agent) -> 112 passed, 0 failed in 58.88s first run; Wikipedia MCP stdio smoke x3 in standard mode without client retries: 0 stale errors on observe/act, 0 approval pauses; internal retries absorbed 1/0/1 after search and 1/0/1 after link click"
       },
       {
         "id": "F5",
@@ -504,11 +505,15 @@
       {
         "hash": "cb059ae",
         "message": "feat(policy): host approval modes for autonomous agents"
+      },
+      {
+        "hash": "3e598bb",
+        "message": "fix(observe): retry read-only revalidation while the page settles"
       }
     ],
-    "status": "F4 committed cb059ae; F4b (read-only revalidation retry) pending",
+    "status": "F1-F4b committed; awaiting parent's final unified gate, then F5 release docs (Harness)",
     "open_followups": [
-      "Intermittent stale_observation (2/~30) on screenshot observe while Wikipedia still loading; pre-existing revalidation behaviour noted during F3 verification, tracked for follow-up"
+      "Intermittent stale_observation (2/~30) on screenshot observe while Wikipedia still loading; pre-existing revalidation behaviour noted during F3 verification, tracked for follow-up -> addressed by F4b 3e598bb"
     ]
   },
   "network_devtools_phase_2026_10_09": {
@@ -519,7 +524,7 @@
   },
   "current_phase": {
     "feature": "autonomy round 2026-10-10",
-    "phase": "F4 committed cb059ae and pushed; F4b (retry read-only revalidation while page settles) pending with Autonomy worker; then F5 release docs (Harness)",
+    "phase": "F4b committed 3e598bb and pushed; next: parent-authorized final unified suite + real-browser evidence gate, then F5 release docs/state commit by Harness",
     "active_section": "autonomy_round_2026_10_10",
     "active_tracker": "agents/autonomy.json",
     "historical_sections": "network_devtools_phase_2026_10_09 and earlier sections remain historical evidence, not acceptance of this round"
