@@ -32,8 +32,9 @@ def test_bounded_surface_contracts():
 
 
 @pytest.mark.asyncio
-async def test_reload_approval_binding_preserves_recovery_warning():
+async def test_reload_approval_binding_preserves_recovery_warning(monkeypatch):
     from test_service import service_with_session
+    monkeypatch.setenv("BROWSER_APPROVAL_MODE", "strict")  # Reload without data risk is ordinary: pauses only in strict.
     service, session = service_with_session()
     observed = await service.dispatch("observe", {"session_id": "s", "tab_id": "t", "detail": "full"})
     paused = await service.dispatch("act", {"session_id": "s", "tab_id": "t", "action": {"observation_id": observed["id"], "operation": "reload"}})
@@ -133,6 +134,7 @@ async def test_official_sdk_incremental_progress_real_browser(transport, monkeyp
     from test_mcp_http_browser import http_server, client_for
     async with deterministic_fixture() as origin:
         monkeypatch.setenv("OPENROUTER_API_KEY", "local-deterministic-fixture-not-live")
+        monkeypatch.setenv("BROWSER_APPROVAL_MODE", "strict")  # The paused reload below is an ordinary-tier action.
         monkeypatch.setenv("BROWSER_AGENT_DECISIONS_ENDPOINT", origin + "/decisions")
         monkeypatch.setenv("BROWSER_AGENT_VISION", "true")
         monkeypatch.setenv("BROWSER_AGENT_TEXT_ENDPOINT", origin + "/visual")
@@ -250,7 +252,7 @@ async def test_official_sdk_websocket_tools_and_host_payload_policy(tmp_path):
     import time
     approvals = tmp_path / "approvals.json"
     approvals.write_text("[]")
-    env = {**os.environ, "BROWSER_APPROVALS_FILE": str(approvals)}
+    env = {**os.environ, "BROWSER_APPROVALS_FILE": str(approvals), "BROWSER_APPROVAL_MODE": "strict"}  # "Socket" is an ordinary button.
     env.pop("BROWSER_MONITOR_PAYLOADS", None)
     async with traffic_site() as origin, Client(StdioServerParameters(command=sys.executable, args=["-m", "browser_automation.mcp"], env=env), mode="legacy") as client:
         async def call(name, args):

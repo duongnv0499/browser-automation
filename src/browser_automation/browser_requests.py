@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
+from .approval_policy import approval_mode_from_env, audit, classify_network, classify_redirect, requires_approval
 from .browser_network_data import PRIVACY_NOTE, body_chunk, is_sensitive_header, safe_body, safe_headers, safe_url, sensitive_allowed
 
 _TOKEN = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
@@ -64,6 +65,8 @@ class Plan:
     expires_at: float
     source: tuple[str, str, str] | None
     preview_json: str
+    approval_mode: str = 'standard'
+    host_requires_approval: bool = False
 
 
 class RequestExecutor:
@@ -78,7 +81,8 @@ class RequestExecutor:
         self._call_sequence = 0
         self._call_evictions: dict[str, int] = {}
 
-    def prepare(self, tab_id: str, page: Any, spec: dict[str, Any], *, source: Any = None, source_context: Any = None, document_generation: int = 0) -> dict[str, Any]:
+    def prepare(self, tab_id: str, page: Any, spec: dict[str, Any], *, source: Any = None, source_context: Any = None, document_generation: int = 0, approval_mode: str | None = None) -> dict[str, Any]:
+        mode = approval_mode or approval_mode_from_env()
         allowed = {'url', 'method', 'headers', 'body', 'json_body', 'form', 'body_base64', 'params', 'timeout_ms', 'max_redirects'}
         unknown = set(spec) - allowed
         if unknown:
@@ -158,7 +162,8 @@ class RequestExecutor:
         if isinstance(redirects, bool) or not isinstance(redirects, int) or not 0 <= redirects <= bounded_env('BROWSER_NETWORK_REDIRECT_LIMIT', 20):
             raise ValueError('max_redirects exceeds host redirect limit')
         reasons = []
-        if os.environ.get('BROWSER_NETWORK_REQUIRE_APPROVAL') == '1':
+        host_requires = os.environ.get('BROWSER_NETWORK_REQUIRE_APPROVAL') == '1'
+        if host_requires:
             reasons.append('Host requires approval for every request')
         if method not in {'GET', 'HEAD', 'OPTIONS'}:
             reasons.append('Method is not an HTTP safe method')
@@ -170,6 +175,9 @@ class RequestExecutor:
             reasons.append('Explicit credential header modification')
         if _RISK.search(urlsplit(url).path + '?' + urlsplit(url).query):
             reasons.append('URL names suggest a consequential action')
+        # Tier the reasons (the host-wide flag is not a tier: it always forces approval).
+        tier = classify_network([r for r in reasons if r != 'Host requires approval for every request'], url)
+        approval_required = host_requires or requires_approval(tier, mode)
         now = time.time()
         for key, old in list(self._plans.items()):
             if old.expires_at <= now:
@@ -191,8 +199,8 @@ class RequestExecutor:
         # Raw URL participates in the hash, never appears in a default model preview.
         digest = hashlib.sha256(json.dumps({**binding, 'raw_url': url, 'raw_page_url': page.url}, sort_keys=True).encode()).hexdigest()
         binding['plan_hash'] = digest
-        preview = {'status': 'approval_required' if reasons else 'prepared', 'plan_id': plan_id, 'plan_hash': digest, 'binding': binding, 'expires_at': now + 300, 'approval_required': bool(reasons), 'approval_reason': '; '.join(reasons) or 'Same-origin HTTP safe method; servers can violate safe-method semantics', 'request': {'url': safe_url(url), 'method': method, 'headers': binding['headers_preview'], 'headers_truncated': binding['headers_preview_truncated'], 'body_bytes': len(body) if body is not None else 0}, 'limitations': ['API requests do not render the DOM', 'Duplicate original request headers collapsed to their last value'] if duplicates else ['API requests do not render the DOM']}
-        self._plans[plan_id] = Plan(plan_id, tab_id, page.context, page.url, document_generation, url, method, tuple(headers.values()), body, timeout, redirects, now + 300, source_binding, json.dumps(preview))
+        preview = {'status': 'approval_required' if approval_required else 'prepared', 'plan_id': plan_id, 'plan_hash': digest, 'binding': binding, 'expires_at': now + 300, 'approval_required': approval_required, 'approval_tier': tier, 'approval_mode': mode, 'approval_reason': '; '.join(reasons) or 'Same-origin HTTP safe method; servers can violate safe-method semantics', 'request': {'url': safe_url(url), 'method': method, 'headers': binding['headers_preview'], 'headers_truncated': binding['headers_preview_truncated'], 'body_bytes': len(body) if body is not None else 0}, 'limitations': ['API requests do not render the DOM', 'Duplicate original request headers collapsed to their last value'] if duplicates else ['API requests do not render the DOM']}
+        self._plans[plan_id] = Plan(plan_id, tab_id, page.context, page.url, document_generation, url, method, tuple(headers.values()), body, timeout, redirects, now + 300, source_binding, json.dumps(preview), mode, host_requires)
         return preview
 
     def plan(self, plan_id: str) -> Plan:
@@ -238,10 +246,16 @@ class RequestExecutor:
                 next_url = checked_url(urljoin(url, location))
                 cross_origin = origin(next_url) != origin(url)
                 risky_destination = bool(_RISK.search(urlsplit(next_url).path + '?' + urlsplit(next_url).query))
-                if cross_origin or risky_destination and next_url != plan.url:
+                hop_tier = classify_redirect(next_url, cross_origin=cross_origin, carries_credentials=any(is_sensitive_header(name) for name in headers))
+                needs_reapproval = (cross_origin or risky_destination and next_url != plan.url) and (plan.host_requires_approval or requires_approval(hop_tier, plan.approval_mode))
+                if needs_reapproval:
                     record['diagnostic'] = {'code': 'redirect_reapproval_required', 'url': safe_url(next_url), 'message': 'Foreign-origin or consequential-looking redirect was not sent; prepare a separately approved call to this exact destination', 'next_request': {'url': safe_url(next_url), 'method': 'GET' if response.status == 303 and method != 'HEAD' or response.status in {301, 302} and method == 'POST' else method, 'body_sha256': hashlib.sha256(body).hexdigest() if body is not None else None}}
                     break
-                record['redirects'].append({'status': response.status, 'url': safe_url(url), 'destination': safe_url(next_url)})
+                hop = {'status': response.status, 'url': safe_url(url), 'destination': safe_url(next_url)}
+                if cross_origin or risky_destination and next_url != plan.url:
+                    # Autonomous standing approval for a below-critical hop; credentials never cross.
+                    hop['approval'] = audit(plan.approval_mode, hop_tier, 'Foreign-origin or consequential-looking redirect followed under host approval mode')
+                record['redirects'].append(hop)
                 await response.dispose()
                 record['response'] = None
                 if response.status == 303 and method != 'HEAD' or response.status in {301, 302} and method == 'POST':

@@ -37,10 +37,10 @@
  "features": {
   "F1": "COMMITTED 687cf22 (pushed)",
   "F2": "COMMITTED 481041a (pushed)",
-  "F3": "VERIFIED_awaiting_GitOwner_commit",
-  "F4": "not_started"
+  "F3": "COMMITTED 5aae8c3 (pushed)",
+  "F4": "VERIFIED_awaiting_GitOwner_commit"
  },
- "current_feature": "F3 compact observations (commit: feat(observe): compact observation output for agent clients)",
+ "current_feature": "F4 host approval modes (commit: feat(policy): host approval modes for autonomous agents)",
  "decisions": {
   "navigate_ownership": "BrowserSession.navigate accepts only pages in _owned (new_tab or popups of owned tabs) in both attached and isolated sessions; otherwise NotOwnedTabError(UnsafeActionError) code not_owned_tab, recommended_next_action new_tab",
   "navigate_url_rules": "Destination must pass BrowserSession._allowed_url (HTTP(S) with host or about:blank); service additionally applies web_url -> prohibited_url before any browser call",
@@ -62,7 +62,17 @@
   "f3_full": "detail=full returns the unmodified observation; only additive optional element fields expanded/selected/disabled (from aria-*) were added in snapshot.js and are not in the digest",
   "f3_text_scope": "snapshot.js option text_scope=document collects document_text (readable: nonempty text box, not visibility:hidden, no opacity-0 ancestor via memoized walk) with its own max_document_chars budget; viewport text and its budget (incl. frame headers) unchanged so _semantic_digest/_validate never see offscreen text. BrowserSession.observe(text_scope) uses document text for sections/snapshot text, so text continuation works. Offscreen iframes still skipped (limitations)",
   "f3_run": "run result.observation compacted after the paused-run cache insertion unless detail=full",
-  "f3_href": "Real-page check: compact was 36.1% (HN) / 34.6% (Wikipedia) of full; dominant element bytes were href (absolute same-origin URLs), id, ops. Same-origin link hrefs are now emitted origin-relative ('/item?id=..', lossless against observation url) -> 31.9% / 31.3%. Remaining: ids (f+32-hex document token+':n', engine contract/security token, unchanged) and ops (real capabilities, e.g. native link drag), not treated as noise"
+  "f3_href": "Real-page check: compact was 36.1% (HN) / 34.6% (Wikipedia) of full; dominant element bytes were href (absolute same-origin URLs), id, ops. Same-origin link hrefs are now emitted origin-relative ('/item?id=..', lossless against observation url) -> 31.9% / 31.3%. Remaining: ids (f+32-hex document token+':n', engine contract/security token, unchanged) and ops (real capabilities, e.g. native link drag), not treated as noise",
+  "f4_policy_module": "approval_policy.py: approval_mode_from_env (BROWSER_APPROVAL_MODE strict|standard|autonomous, default standard, strip+lowercase, invalid -> ApprovalPolicyError code invalid_approval_mode), requires_approval(tier,mode), classify_action (port of legacy _approval_reason + reload tiering), approval_reason (strict == legacy), classify_navigation, classify_transfer, classify_network (+NETWORK_REASON_TIERS), classify_redirect, recovery_requires_approval, audit",
+  "f4_parity": "tier=='none' iff the legacy classifier returned None, and the legacy reason string is always returned unchanged; strict threshold=ordinary, so strict reproduces legacy decisions and reasons by construction and strict \u2287 standard \u2287 autonomous. Verified by a table test against a frozen verbatim copy of the legacy function over ~40k element/action combinations plus reload pages",
+  "f4_tiers": "critical: sensitive fill/select; click or Enter/Space whose name/role/href/form_action matches payment (buy, pay(ment), purchase, checkout, place order, transfer/send money) or account deletion; network credential-header edits or payment-like URL (incl. redirect hops; cross-origin hop carrying credential-like headers). consequential: legacy risky/submit click reason; custom control in POST form or named log out/sign out; Enter/Space on submit/risky/POST-form/log-out controls or targetless; reload with data-risk reason; upload/download; non-safe/foreign/body/consequential-URL network; navigate to risky URL names. ordinary: other custom/visual controls, other Enter/Space, drag, reload without data risk. none: legacy no-reason",
+  "f4_link_logout_deviation": "Links named 'Log out' stay tier none (legacy returned no reason); making them consequential would make standard stricter than strict. Buttons/custom controls named log out are consequential (legacy already paused them in strict)",
+  "f4_service": "mode re-read from env per dispatch; doctor reports approval_mode (+approval_mode_error); every other command fails with invalid_approval_mode. act: classify -> pause (binding unchanged; result adds tier/approval_mode; pending stores tier/mode) or execute with approval audit when tier!=none. approved_act adds host_token audit (run-paused pending tiered from cached snapshot). navigate: risky URL -> binding {session_id, operation:navigate, tab_id, url, reason}; resume by repeating navigate with approval_token; audit on success. upload/download: strict/standard keep legacy token lookup (_approve(binding, token)) ; autonomous runs under standing approval when BROWSER_FILES_DIRECTORY set; download click tier included (critical click still needs token). run passes approval_mode to BrowserAgent; observe composes page_state with mode. network_call/replay pass approval_mode to the engine; executed results get audit; network_execute adds host_token audit",
+  "f4_network": "RequestExecutor.prepare(approval_mode=None -> env): reasons unchanged; approval_required = BROWSER_NETWORK_REQUIRE_APPROVAL or requires_approval(classify_network(reasons), mode); preview adds approval_tier/approval_mode; Plan stores mode and host flag. Redirect hop needing re-approval: (cross-origin or risky) and (host flag or requires_approval(hop tier, plan mode)); followed hops in autonomous carry an approval audit",
+  "f4_agent": "BrowserAgent(approval_mode='strict' default for library compatibility); _approval_reason(..., mode='strict') delegates; step records carry approval audit (host_policy or host_token via callback); compose_page_state(..., mode)",
+  "f4_test_env": "Transport tests that exercise pre-mode pausing of ordinary actions (MCP drag, websocket 'Socket' button, ordinary reload, F2 stale-approval 'Free action') pin BROWSER_APPROVAL_MODE=strict explicitly",
+  "f4_word_refinement": "Parent-required: consequential needs whole-word risk name (links: leading imperative word, added after the Wikipedia smoke paused 'Hypertext Transfer Protocol'), submit/risky/POST form, or action-like URL segment/query token (delete|remove|logout|log-out|signout|sign-out|unsubscribe|subscribe|submit|publish|send|confirm|accept|authorize|transfer|checkout|purchase|buy|pay bounded by [/?&=;] and [/?&=;.#]); substring-only legacy matches -> ordinary. Same for classify_navigation (substring-only -> ordinary) and network 'URL names' reason. Tier none-ness unchanged (parity). Critical rules unchanged: known remaining false-positive class, e.g. a content link named 'Payment' or href '/how-to-buy-x' is critical",
+  "f4_link_cap": "Parent decision 2026-10-11: plain link activation (role link, no submit/POST/risky) is a GET navigation; payment-like link names/hrefs capped at consequential. Buttons, submit controls, forms, sensitive fills and network plans keep the critical floor. Tier none-ness unchanged"
  },
  "research": [
   {
@@ -123,9 +133,31 @@
    "docs/browser.md",
    "docs/integrations.md",
    "agents/autonomy.json"
+  ],
+  "F4": "implemented and verified 2026-10-11",
+  "F4_changed": [
+   "src/browser_automation/approval_policy.py",
+   "src/browser_automation/agent.py",
+   "src/browser_automation/page_state.py",
+   "src/browser_automation/browser_requests.py",
+   "src/browser_automation/browser.py",
+   "src/browser_automation/service.py",
+   "src/browser_automation/mcp.py",
+   "tests/test_approval_policy.py",
+   "tests/test_agent.py",
+   "tests/test_agent_surface.py",
+   "tests/test_browser.py",
+   "tests/test_service.py",
+   "tests/test_service_stdio.py",
+   "docs/integrations.md",
+   "docs/network.md",
+   "docs/providers.md",
+   "docs/browser.md",
+   ".env.example",
+   "agents/autonomy.json"
   ]
  },
- "requested_verification": "F3 done; next verification after F4 implementation",
+ "requested_verification": "F4 done; final unified verification at parent's discretion",
  "blockers": [],
  "verification": {
   "F1": {
@@ -252,6 +284,57 @@
     "stale_observations": "Intermittently (2 of ~30 runs) a screenshot observe shortly after Wikipedia load raised stale_observation from the existing screenshot self-validation (page still changing asynchronously; infobox image visibly unloaded in screenshot). Not reproduced in 16 targeted repeats; behaviour is the pre-existing fail-closed check, retried once by the measurement script",
     "latency_kind": "browser+service in-process observe, single run each on public sites; network variance uncontrolled"
    }
+  },
+  "F4": {
+   "date": "2026-10-11",
+   "environment": "macOS, Python 3.13 .venv, playwright 1.63.0, headless isolated Chromium (+throwaway CDP Chromium); node for OMP bridge tests; no native user Chrome, no live provider",
+   "suite": {
+    "command": "BROWSER_PROOF_DIR=/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/proof-f4 BROWSER_INTEGRATION_TESTS=1 uv run --extra http pytest tests --deselect tests/test_service_omp.py::test_actual_omp_extension_load --basetemp=/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/f4 -p no:cacheprovider",
+    "first_run": "265 passed, 1 deselected, 140.31s (after the substring refinement)",
+    "final": "268 passed, 1 deselected, 0 failed, 141.05s (after the link leading-word refinement + 3 table rows)",
+    "deselected_reason": "local omp 18.2.1 rejects --no-ui (parent-designated environment issue)"
+   },
+   "screenshot_viewed": "/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/proof-f4/autonomous-delete-proof.png (status 'Deleted' after autonomous Delete click; password field masked)",
+   "wikipedia_standard_smoke": {
+    "script": "/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/f4_wiki_smoke.py (uv --directory <repo> run browser-agent-mcp, raw JSON-RPC, BROWSER_APPROVAL_MODE=standard, headless isolated launch)",
+    "flow": "new_tab Web_browser -> fill 'Search Wikipedia' 'Web server' -> press Enter (ordinary, auto-allowed with audit; navigated to /wiki/Web_server) -> click content link 'Hypertext Transfer Protocol' (ordinary, audit; navigated to /wiki/HTTP)",
+    "runs": 3,
+    "paused": [
+     0,
+     0,
+     0
+    ],
+    "before_link_refinement": "1 of 3 runs paused on 'Hypertext Transfer Protocol' (whole word 'Transfer' in a link title) -> fixed with leading-word rule for links",
+    "stale_friction": "Each run needed 1-2 reobserves: screenshot observe right after a navigation (page still settling) and occasionally act after the search autocomplete expanded raised stale_observation (pre-input, safe to retry). Recommend a follow-up: bounded internal retry of read-only screenshot-observe self-validation",
+    "screenshots": [
+     "/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/proof-f4/wiki-after-search.png",
+     "/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/proof-f4/wiki-after-link.png"
+    ],
+    "latency_ms": {
+     "fill": [
+      81.2,
+      78.1,
+      155.6
+     ],
+     "enter": [
+      617.5,
+      793.0,
+      1740.3
+     ],
+     "link_click": [
+      781.3,
+      360.9,
+      489.8
+     ]
+    },
+    "latency_kind": "MCP tool round trip incl. settle, public site, single runs"
+   },
+   "link_cap_subset": {
+    "command": "BROWSER_INTEGRATION_TESTS=1 uv run --extra http pytest tests/test_approval_policy.py tests/test_agent.py tests/test_agent_surface.py tests/test_service.py tests/test_browser.py --basetemp=<scratchpad>/f4b -p no:cacheprovider",
+    "first_run": "1 failed, 134 passed, 150.96s: test_attached_disconnect_preserves_user_tabs TimeoutError connecting over CDP to the throwaway external Chromium (code path untouched by F4); passed alone in 2.21s",
+    "rerun": "135 passed, 0 failed, 36.46s"
+   }
   }
- }
+ },
+ "next": "F4b (after F4 commit lands): bounded internal retry of read-only screenshot-observe revalidation while the page settles; act stays fail-fast"
 }

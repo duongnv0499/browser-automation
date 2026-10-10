@@ -6,13 +6,13 @@ import copy
 import hashlib
 import inspect
 import json
-import re
 import time
 from collections import deque
 from typing import Callable
 
 from .providers import ProviderError, ProviderRefusal, action_candidates
-from .page_state import compose_page_state, recovery_policy_from_env, reload_approval_reason
+from .page_state import compose_page_state, recovery_policy_from_env
+from .approval_policy import MODES, approval_reason, audit, classify_action, requires_approval
 
 class _ProgressDeliveryError(RuntimeError):
     """A failed host callback stops the run without exposing callback contents."""
@@ -26,7 +26,7 @@ class BrowserAgent:
                  no_progress_limit: int = 3, verification_threshold: float = 0.9,
                  stale_limit: int = 3, interpret_visual: bool = False,
                  on_progress: Callable | None = None,
-                 recovery_policy: dict | None = None):
+                 recovery_policy: dict | None = None, approval_mode: str = "strict"):
         if max_steps < 1 or history_limit < 1 or no_progress_limit < 1 or stale_limit < 0 or max_text < 1:
             raise ValueError("Agent bounds must be positive")
         if not 0 <= verification_threshold <= 1:
@@ -39,6 +39,10 @@ class BrowserAgent:
         self.screenshot = screenshot or self.interpret_visual
         self.on_progress = on_progress
         self.recovery_policy = copy.deepcopy(recovery_policy) if recovery_policy is not None else recovery_policy_from_env()
+        if approval_mode not in MODES:
+            raise ValueError("approval_mode must be strict, standard, or autonomous")
+        # Host policy only; library default "strict" keeps the pre-mode behaviour.
+        self.approval_mode = approval_mode
         self.max_text = max_text
         self.history_limit = history_limit
         self.no_progress_limit = no_progress_limit
@@ -63,32 +67,9 @@ class BrowserAgent:
         return hashlib.sha256(json.dumps(state, sort_keys=True).encode()).hexdigest()
 
     @staticmethod
-    def _approval_reason(action: dict, observation: dict, *, recovery_policy: dict | None = None) -> str | None:
-        operation = action["operation"]
-        if operation == "reload":
-            return reload_approval_reason(observation, recovery_policy)
-        element = next((e for e in observation.get("elements", []) if e.get("id") == action.get("target")), {})
-        description = " ".join(str(element.get(k, "")) for k in ("name", "role", "type", "input_type", "href", "form_action")).lower()
-        activation_key = str(action.get("key", "")).split("+")[-1].lower()
-        if operation == "press" and activation_key in {"enter", "return", "space", "spacebar", " "}:
-            return "Keyboard activation may submit, confirm, or activate a consequential control"
-        if operation in {"fill", "select"} and (element.get("sensitive") or "password" in description or re.search(r"credit.?card|payment|social security|secret|token|cvv", description)):
-            return "Sensitive field input"
-        if operation == "click":
-            risk_description = " ".join(str(element.get(k) or "") for k in ("name", "role", "href", "form_action")).lower()
-            submits = element.get("is_submit") or element.get("input_type") == "submit" and bool(element.get("form_action"))
-            if submits or element.get("risky") or re.search(r"buy|pay|purchase|checkout|order|delete|remove|send|submit|publish|post|transfer|confirm|accept|authorize|sign.?in|log.?in|upload|download|subscribe|unsubscribe", risk_description):
-                return "Potential submission, disclosure, account change, payment, or destructive action"
-            label = str(element.get("name", "")).strip().lower()
-            benign = re.fullmatch(r"(?:search|find|next|previous|back|expand|collapse|open menu|close menu|menu|show more|show less|close|cancel)(?:\s+results)?", label)
-            if benign and not element.get("risky") and not submits and str(element.get("form_method") or "").lower() != "post":
-                return None
-            # Custom controls and visual-only targets cannot be classified reliably.
-            if element.get("role") not in {"link", "checkbox", "radio", "tab", "option", "menuitem"}:
-                return "Button/custom control may have consequential side effects"
-        if operation == "drag":
-            return "Drag/drop may move, upload, or mutate content"
-        return None
+    def _approval_reason(action: dict, observation: dict, *, recovery_policy: dict | None = None, mode: str = "strict") -> str | None:
+        """Compatibility wrapper; approval_policy is the single source of truth."""
+        return approval_reason(action, observation, mode=mode, recovery_policy=recovery_policy)
 
     @staticmethod
     def _is_preinput_stale(exc: Exception) -> bool:
@@ -184,7 +165,7 @@ class BrowserAgent:
                 visual = await self.provider.interpret_visual(result)
                 account(getattr(self.provider, "last_metrics", {}))
                 result["visual_summary"] = visual
-            result["page_state"] = compose_page_state(result, result.get("visual_summary"), self.recovery_policy)
+            result["page_state"] = compose_page_state(result, result.get("visual_summary"), self.recovery_policy, self.approval_mode)
             result["text_offset"] = 0
             known_tabs[tab_id] = {"id": tab_id, "url": result.get("url"), "title": result.get("title")}
             result["available_tabs"] = [tab for id_, tab in known_tabs.items() if id_ != tab_id]
@@ -277,7 +258,10 @@ class BrowserAgent:
                     text = await self.provider.field_text(observation, goal, action["target"], list(history))
                     account(getattr(self.provider, "last_metrics", {}))
                     action["text"] = text
-                reason = self._approval_reason(action, observation, recovery_policy=self.recovery_policy)
+                tier, tier_reason = classify_action(action, observation, recovery_policy=self.recovery_policy)
+                reason = tier_reason if requires_approval(tier, self.approval_mode) else None
+                # Non-none tiers that run carry an audit: standing host policy or an exact host token.
+                approval_audit = audit(self.approval_mode, tier, tier_reason) if tier != "none" else None
                 if reason:
                     binding = hashlib.sha256(json.dumps({"tab_id": tab_id, "action": action}, sort_keys=True).encode()).hexdigest()
                     pending = {"tab_id": tab_id, "observation_id": observation["id"],
@@ -295,6 +279,7 @@ class BrowserAgent:
                         status = "approval_required"
                         break
                     pending = None
+                    approval_audit = audit(self.approval_mode, tier, tier_reason, source="host_token")
                 begin = time.perf_counter()
                 try:
                     result = await self.session.act(tab_id, action)
@@ -317,6 +302,8 @@ class BrowserAgent:
                     break
                 record = {"action": copy.deepcopy(action), "result": result,
                           "confidence": decision.get("confidence")}
+                if approval_audit is not None:
+                    record["approval"] = approval_audit
                 steps.append(record)
                 # Bounded compact history never includes screenshots or arbitrary result bodies.
                 history.append({"operation": operation, "target": action.get("target"),

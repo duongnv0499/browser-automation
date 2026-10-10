@@ -316,3 +316,68 @@ async def test_observe_detail_and_visual_region_shapes():
     assert full["elements"] == elements and full["safety"] == {}
     with pytest.raises(ServiceError):
         await service.dispatch("observe", {"session_id": "s", "tab_id": "t", "detail": "brief"})
+
+
+@pytest.mark.asyncio
+async def test_invalid_host_approval_mode_fails_every_tool_but_doctor_reports(monkeypatch):
+    monkeypatch.setenv("BROWSER_APPROVAL_MODE", "yolo")
+    service, session = service_with_session()
+    doctor = await service.dispatch("doctor")
+    assert doctor["approval_mode"] is None and "BROWSER_APPROVAL_MODE" in doctor["approval_mode_error"]
+    for command, args in (("tabs", {"session_id": "s"}), ("observe", {"session_id": "s", "tab_id": "t"}), ("launch", {"headless": True})):
+        with pytest.raises(Exception) as error:
+            await service.dispatch(command, args)
+        assert error.value.code == "invalid_approval_mode"
+    monkeypatch.setenv("BROWSER_APPROVAL_MODE", "strict")
+    assert (await service.dispatch("doctor"))["approval_mode"] == "strict"
+    monkeypatch.delenv("BROWSER_APPROVAL_MODE")
+    assert (await service.dispatch("doctor"))["approval_mode"] == "standard"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode,paused", [("strict", True), ("standard", True), ("autonomous", False)])
+async def test_consequential_click_follows_host_mode_with_audit(mode, paused, monkeypatch):
+    monkeypatch.setenv("BROWSER_APPROVAL_MODE", mode)
+    service, session = service_with_session()
+    await service.dispatch("observe", {"session_id": "s", "tab_id": "t"})
+    action = {"observation_id": "revision", "operation": "click", "target": "button", "settle_ms": 0}
+    result = await service.dispatch("act", {"session_id": "s", "tab_id": "t", "action": action})
+    if paused:
+        assert result["status"] == "approval_required" and result["tier"] == "consequential" and result["approval_mode"] == mode
+        assert "tier" not in result["binding"]  # Binding shape unchanged; tier is metadata.
+    else:
+        assert result["executed"] == action
+        assert result["approval"] == {"source": "host_policy", "mode": "autonomous", "tier": "consequential",
+                                      "reason": "Potential submission, disclosure, account change, payment, or destructive action"}
+
+
+@pytest.mark.asyncio
+async def test_navigate_and_transfers_follow_host_mode(tmp_path, monkeypatch):
+    approvals = tmp_path / "approvals.json"
+    approvals.write_text("[]")
+    monkeypatch.setenv("BROWSER_APPROVALS_FILE", str(approvals))
+    monkeypatch.setenv("BROWSER_FILES_DIRECTORY", str(tmp_path))
+    service, session = service_with_session()
+    navigate = {"session_id": "s", "tab_id": "t", "url": "https://example.com/logout"}
+    paused = await service.dispatch("navigate", navigate)
+    assert paused["status"] == "approval_required" and not hasattr(session, "navigated")
+    approvals.write_text(json.dumps([{"token": "host-nav", "binding": paused["binding"], "expires_at": time.time() + 60}]))
+    moved = await service.dispatch("navigate", {**navigate, "approval_token": "host-nav"})
+    assert moved["approval"]["source"] == "host_token" and session.navigated[1] == "https://example.com/logout"
+    plain = await service.dispatch("navigate", {**navigate, "url": "https://example.com/articles"})
+    assert "approval" not in plain
+    async def upload(tab_id, observation_id, target, paths, *, allowed_directory, approved):
+        return {"tab_id": tab_id, "operation": "upload", "count": len(paths), "directory": allowed_directory, "approved": approved}
+    session.upload = upload
+    request = {"session_id": "s", "tab_id": "t", "observation_id": "revision", "target": "file", "paths": [str(tmp_path / "a.txt")]}
+    assert (await service.dispatch("upload", request))["status"] == "approval_required"
+    monkeypatch.setenv("BROWSER_APPROVAL_MODE", "autonomous")
+    uploaded = await service.dispatch("upload", request)
+    assert uploaded["directory"] == str(tmp_path) and uploaded["approval"] == {"source": "host_policy", "mode": "autonomous", "tier": "consequential", "reason": "Local file upload discloses host files to the page"}
+    auto_nav = await service.dispatch("navigate", navigate)
+    assert auto_nav["approval"]["source"] == "host_policy" and auto_nav["approval"]["tier"] == "consequential"
+    monkeypatch.delenv("BROWSER_FILES_DIRECTORY")
+    service.files_directory = None
+    with pytest.raises(ServiceError) as scoped:
+        await service.dispatch("upload", request)
+    assert scoped.value.code == "file_policy_required"

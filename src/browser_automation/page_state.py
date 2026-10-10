@@ -113,7 +113,9 @@ def reload_approval_reason(observation: dict, policy: dict | None = None) -> str
     return None
 
 
-def compose_page_state(observation: dict, visual: dict | None = None, policy: dict | None = None) -> dict:
+def compose_page_state(observation: dict, visual: dict | None = None, policy: dict | None = None, mode: str = "strict") -> dict:
+    """Recovery candidates' approval_required follows the host approval mode (strict = legacy)."""
+    from .approval_policy import recovery_requires_approval
     result = describe_dom(observation)
     if visual is not None:
         result = {**result, "dom": dict(result), "vision": visual, "source": "dom+vision"}
@@ -124,6 +126,9 @@ def compose_page_state(observation: dict, visual: dict | None = None, policy: di
             result["recovery_candidates"] = [_reload_candidate("vision")]
     reason = reload_approval_reason(observation, policy) if result["recovery_candidates"] else None
     for candidate in result["recovery_candidates"]:
-        candidate["approval_required"] = reason is not None
-        candidate["policy_reason"] = reason or "Host approved this origin; complete DOM error observation has no detected editable/sensitive evidence."
+        candidate["approval_required"] = recovery_requires_approval(reason, mode)
+        if reason is not None and not candidate["approval_required"]:
+            candidate["policy_reason"] = f"Host approval mode {mode} grants standing approval: {reason}"
+        else:
+            candidate["policy_reason"] = reason or "Host approved this origin; complete DOM error observation has no detected editable/sensitive evidence."
     return result

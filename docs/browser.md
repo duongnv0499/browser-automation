@@ -142,6 +142,8 @@ WebSocket `capture_scope: "main_page_cdp_target"` explicitly excludes worker and
 
 ## Explicit uploads and downloads
 
+The engine-level `approved=True` arguments below are trusted host decisions. Transports derive them from the host approval mode (`BROWSER_APPROVAL_MODE`, see [integrations](integrations.md#host-approval-modes)): an exact token in `strict`/`standard`, standing host approval in `autonomous`, with the directory scope always enforced.
+
 File transfers are **host-policy operations**, not actions through which a model grants itself filesystem permission. Bind `allowed_directory` to a trusted host/user configuration, and set `approved=True` only after approval of the exact operation/target/revision/paths. Transport services bind approval tokens separately.
 
 ```python

@@ -14,6 +14,9 @@ from collections import OrderedDict
 from urllib.parse import urlsplit
 
 
+from .approval_policy import ApprovalPolicyError, approval_mode_from_env, audit, classify_action, classify_navigation, classify_transfer, max_tier, requires_approval
+
+
 class ServiceError(Exception):
     def __init__(self, code: str, message: str):
         super().__init__(message)
@@ -95,12 +98,19 @@ class BrowserService:
         from .mcp import validate_arguments
         validate_arguments(command, args)
         if command == "doctor":
+            try:
+                mode, mode_error = approval_mode_from_env(), None
+            except ApprovalPolicyError as exc:
+                mode, mode_error = None, str(exc)
             return {"python_playwright": importlib.util.find_spec("playwright") is not None,
+                    "approval_mode": mode, **({"approval_mode_error": mode_error} if mode_error else {}),
                     "openrouter_key": bool(os.environ.get("OPENROUTER_API_KEY")),
                     "openai_key": bool(os.environ.get("OPENAI_API_KEY")),
                     "transport": "local stdio", "sessions": list(self.sessions),
                     "native_consent": os.environ.get("BROWSER_NATIVE_CONSENT") == "1",
                     "native_guidance": "Enable Chrome remote debugging consent; set BROWSER_NATIVE_CONSENT=1 for connect_default. Explicit loopback CDP connect never falls back to isolated launch."}
+        # Host policy, re-read per call; an invalid value fails every tool call (never relaxed).
+        mode = approval_mode_from_env()
         if command in {"launch", "connect", "connect_default"}:
             from .browser import BrowserSession
             async with self._lifecycle:
@@ -140,6 +150,15 @@ class BrowserService:
                 return {"tab": await browser.new_tab(url, wait_until=args.get("wait_until", "domcontentloaded"), timeout_ms=args.get("timeout_ms", 15000))}
             if command == "navigate":
                 url = web_url(args["url"])
+                tier, reason = classify_navigation(url)
+                approval = audit(mode, tier, reason) if tier != "none" else None
+                if requires_approval(tier, mode):
+                    binding = {"session_id": sid, "operation": "navigate", "tab_id": args["tab_id"], "url": url, "reason": reason}
+                    if not self._approve(binding, args.get("approval_token")):
+                        return {"status": "approval_required", "binding": binding, "expires_at": time.time() + 300, "tier": tier, "approval_mode": mode,
+                                "host_command": "browser-agent approve --binding-file binding.json --approval-file /path/to/approvals.json",
+                                "resume_tool": "navigate (same arguments plus approval_token)"}
+                    approval = audit(mode, tier, reason, source="host_token")
                 try:
                     result = await browser.navigate(args["tab_id"], url, wait_until=args.get("wait_until", "domcontentloaded"), timeout_ms=args.get("timeout_ms", 15000))
                 except Exception as exc:
@@ -147,6 +166,8 @@ class BrowserService:
                         self._forget_tab(sid, args["tab_id"])
                     raise
                 self._forget_tab(sid, args["tab_id"])
+                if approval is not None:
+                    result["approval"] = approval
                 return result
             if command == "observe":
                 limit = args.get("max_text", 12000)
@@ -170,7 +191,7 @@ class BrowserService:
                         if provider is not None:
                             with anyio.move_on_after(5, shield=True):
                                 await provider.close()
-                observation["page_state"] = compose_page_state(observation, visual=visual, policy=self.recovery_policy)
+                observation["page_state"] = compose_page_state(observation, visual=visual, policy=self.recovery_policy, mode=mode)
                 # The cache always keeps the FULL observation: approval classification
                 # needs href/form/submit metadata that compact output omits.
                 full = dict(observation)
@@ -192,13 +213,12 @@ class BrowserService:
                     raise ServiceError("invalid_argument", "offset must be nonnegative and limit 1..100000")
                 return await browser.text_continuation(snapshot["tab_id"], args["observation_id"], offset=offset, max_text=limit)
             if command == "act":
-                from .agent import BrowserAgent
                 action = args["action"]
                 snapshot = self.snapshots.get((sid, action["observation_id"]))
                 if snapshot is None or snapshot["tab_id"] != args["tab_id"]:
                     raise ServiceError("unknown_observation", "Observe this tab before acting")
-                reason = BrowserAgent._approval_reason(action, snapshot, recovery_policy=self.recovery_policy)
-                if reason:
+                tier, reason = classify_action(action, snapshot, recovery_policy=self.recovery_policy)
+                if requires_approval(tier, mode):
                     # Revalidate (no input) before minting a pending approval: a stale
                     # observation fails now instead of after the human approves it.
                     try:
@@ -219,12 +239,15 @@ class BrowserService:
                         binding["provenance"] = snapshot.get("page_state", {}).get("source", "dom")
                     key = (sid, args["tab_id"], action["observation_id"])
                     expiry = time.time() + 300
-                    self.pending_actions[key] = {"binding": binding, "expires_at": expiry}
+                    self.pending_actions[key] = {"binding": binding, "expires_at": expiry, "tier": tier, "mode": mode}
                     while len(self.pending_actions) > 8:
                         self.pending_actions.pop(next(iter(self.pending_actions)))
-                    return {"status": "approval_required", "binding": binding, "expires_at": expiry,
+                    return {"status": "approval_required", "binding": binding, "expires_at": expiry, "tier": tier, "approval_mode": mode,
                             "host_command": "browser-agent approve --binding-file binding.json --approval-file /path/to/approvals.json", "resume_tool": "approved_act"}
-                return await self._execute_act(sid, browser, args["tab_id"], action)
+                result = await self._execute_act(sid, browser, args["tab_id"], action)
+                if tier != "none":
+                    result["approval"] = audit(mode, tier, reason)
+                return result
             if command == "approved_act":
                 key = (sid, args["tab_id"], args["observation_id"])
                 pending = self.pending_actions.get(key)
@@ -233,7 +256,14 @@ class BrowserService:
                 if not self._approve(pending["binding"], args["approval_token"]):
                     raise ServiceError("approval_required", "Exact host approval token required")
                 del self.pending_actions[key]
-                return await self._execute_act(sid, browser, args["tab_id"], pending["binding"]["action"])
+                action = pending["binding"]["action"]
+                tier = pending.get("tier")
+                if tier is None:  # Paused by run: tier the exact cached action.
+                    cached = self.snapshots.get((sid, args["observation_id"]))
+                    tier = classify_action(action, cached, recovery_policy=self.recovery_policy)[0] if cached else "ordinary"
+                result = await self._execute_act(sid, browser, args["tab_id"], action)
+                result["approval"] = audit(pending.get("mode", mode), tier, pending["binding"].get("reason"), source="host_token")
+                return result
             if command == "close_tab":
                 await browser.close_tab(args["tab_id"])
                 self._forget_tab(sid, args["tab_id"])
@@ -246,13 +276,30 @@ class BrowserService:
                     binding.update({"observation_id": args["observation_id"], "target": args["target"], "paths": args["paths"]})
                 else:
                     binding.update({"action": args["action"], "destination": args["destination"]})
-                if not self._approve(binding, args.get("approval_token")):
-                    return {"status": "approval_required", "binding": binding, "expires_at": time.time() + 300,
-                            "host_command": "browser-agent approve --binding-file binding.json --approval-file /path/to/approvals.json"}
+                tier, reason = classify_transfer(command)
+                if command == "download":
+                    # The triggering click is tiered too: a critical control never rides standing approval.
+                    cached = self.snapshots.get((sid, args["action"].get("observation_id")))
+                    click_tier, click_reason = classify_action(args["action"], cached or {}, recovery_policy=self.recovery_policy)
+                    if max_tier(tier, click_tier) != tier:
+                        tier, reason = click_tier, click_reason
+                token = args.get("approval_token")
+                if requires_approval(tier, mode):
+                    if not self._approve(binding, token):
+                        return {"status": "approval_required", "binding": binding, "expires_at": time.time() + 300, "tier": tier, "approval_mode": mode,
+                                "host_command": "browser-agent approve --binding-file binding.json --approval-file /path/to/approvals.json"}
+                    approval = audit(mode, tier, reason, source="host_token")
+                elif token is not None and self._approve(binding, token):
+                    approval = audit(mode, tier, reason, source="host_token")
+                else:
+                    # Autonomous standing approval; directory scope is still enforced by the engine.
+                    approval = audit(mode, tier, reason)
                 try:
                     if command == "upload":
-                        return await browser.upload(args["tab_id"], args["observation_id"], args["target"], args["paths"], allowed_directory=self.files_directory, approved=True)
-                    return await browser.download(args["tab_id"], args["action"], args["destination"], allowed_directory=self.files_directory, approved=True)
+                        result = await browser.upload(args["tab_id"], args["observation_id"], args["target"], args["paths"], allowed_directory=self.files_directory, approved=True)
+                    else:
+                        result = await browser.download(args["tab_id"], args["action"], args["destination"], allowed_directory=self.files_directory, approved=True)
+                    return {**result, "approval": approval}
                 finally:
                     # Approved transfers may set files or click; prior revisions are no longer trusted.
                     self._forget_tab(sid, args["tab_id"])
@@ -266,7 +313,7 @@ class BrowserService:
                     screenshot = args.get("screenshot")
                     if screenshot is None:
                         screenshot = provider.capabilities["vision"]
-                    agent = BrowserAgent(browser, provider, max_steps=args.get("max_steps", 50), approval=approve, screenshot=screenshot, on_progress=on_progress, recovery_policy=self.recovery_policy, interpret_visual=args.get("interpret_visual", False))
+                    agent = BrowserAgent(browser, provider, max_steps=args.get("max_steps", 50), approval=approve, screenshot=screenshot, on_progress=on_progress, recovery_policy=self.recovery_policy, interpret_visual=args.get("interpret_visual", False), approval_mode=mode)
                     try:
                         result = await agent.run(args["tab_id"], args["goal"])
                     except BaseException:
@@ -313,9 +360,12 @@ class BrowserService:
                 prepare_only = args.pop("prepare_only", False)
                 if command == "network_replay" and args.get("target_tab_id"):
                     web_url(await browser.tab_url(args["target_tab_id"]))
-                plan = await getattr(browser, command)(tab_id, **args)
+                plan = await getattr(browser, command)(tab_id, approval_mode=mode, **args)
                 if not plan["approval_required"] and not prepare_only:
-                    return await browser.network_execute(plan["plan_id"], approved=True)
+                    result = await browser.network_execute(plan["plan_id"], approved=True)
+                    if plan.get("approval_tier", "none") != "none":
+                        result["approval"] = audit(mode, plan["approval_tier"], plan.get("approval_reason"))
+                    return result
                 review = await browser.network_plan(plan["plan_id"])
                 binding = {"session_id": sid, "operation": "network_execute", **review["binding"]}
                 return {**plan, "binding": binding,
@@ -327,7 +377,9 @@ class BrowserService:
                 web_url(await browser.tab_url(binding["target_tab_id"]))
                 if not self._approve(binding, args["approval_token"]):
                     raise ServiceError("approval_required", "Exact host approval token required for this network plan")
-                return await browser.network_execute(args["plan_id"], approved=True)
+                result = await browser.network_execute(args["plan_id"], approved=True)
+                result["approval"] = audit(review.get("approval_mode", mode), review.get("approval_tier", "consequential"), review.get("approval_reason"), source="host_token")
+                return result
             if command in {"network_start", "network_list", "network_stop", "websocket_start", "websocket_list", "websocket_stop"}:
                 kind, operation = command.split("_")
                 tab_id = args.pop("tab_id")

@@ -603,18 +603,18 @@ class BrowserSession:
                 return await self._requests.body(tab_id, request_id, part, offset, limit, include_sensitive)
             return await self._monitor.request_body(tab_id, request_id, part, offset, limit, include_sensitive)
 
-    async def network_call(self, tab_id: str, **spec: Any) -> dict[str, Any]:
+    async def network_call(self, tab_id: str, *, approval_mode: str | None = None, **spec: Any) -> dict[str, Any]:
         async with self._lock:
             page = self._page(tab_id)
-            return self._requests.prepare(tab_id, page, spec, document_generation=self._document_generations[page])
+            return self._requests.prepare(tab_id, page, spec, document_generation=self._document_generations[page], approval_mode=approval_mode)
 
-    async def network_replay(self, tab_id: str, request_id: str, target_tab_id: str | None = None, **overrides: Any) -> dict[str, Any]:
+    async def network_replay(self, tab_id: str, request_id: str, target_tab_id: str | None = None, *, approval_mode: str | None = None, **overrides: Any) -> dict[str, Any]:
         async with self._lock:
             source_page = self._page(tab_id)
             source = await self._monitor.replay_source(tab_id, request_id)
             target = target_tab_id or tab_id
             page = self._page(target)
-            return self._requests.prepare(target, page, overrides, source=source, source_context=source_page.context, document_generation=self._document_generations[page])
+            return self._requests.prepare(target, page, overrides, source=source, source_context=source_page.context, document_generation=self._document_generations[page], approval_mode=approval_mode)
 
     async def _network_plan(self, plan_id: str) -> dict[str, Any]:
         plan = self._requests.plan(plan_id)

@@ -36,6 +36,15 @@ OVERLAY_FIXTURE = b'''<!doctype html><html><head><title>Overlay fixture</title><
 </body></html>'''
 
 
+POLICY_FIXTURE = b'''<!doctype html><html><head><title>Policy fixture</title><style>body{font:18px sans-serif;margin:10px}button,input{margin:5px;padding:6px}</style></head><body>
+<h1 id="count">Count 0</h1>
+<button onclick="n++;document.querySelector('#count').textContent='Count '+n">Add</button>
+<button onclick="document.querySelector('#status').textContent='Deleted'">Delete</button>
+<div id="status" role="status">Kept</div>
+<form method="get" action="/policy"><input name="q" aria-label="Search query"></form>
+<label>Password <input type="password" aria-label="Password"></label>
+<script>let n=0</script>
+</body></html>'''
 LONG_FIXTURE = b'''<!doctype html><html><head><title>Long fixture</title></head><body style="font:18px sans-serif;margin:10px">
 <h1>Top heading</h1><button aria-expanded="false" onclick="this.setAttribute('aria-expanded','true')">Menu toggle</button>
 <div style="height:3000px">Spacer</div>
@@ -72,8 +81,14 @@ async def site():
         try:
             request = await reader.readuntil(b'\r\n\r\n')
             route = request.split(b' ')[1].decode().split('?')[0]
+            length = next((int(line.split(b':', 1)[1]) for line in request.split(b'\r\n') if line.lower().startswith(b'content-length:')), 0)
+            payload = await reader.readexactly(length) if length else b''
             headers = ''
-            if route == '/frame':
+            if route == '/api':
+                body = json.dumps({'method': request.split(b' ')[0].decode(), 'received': payload.decode()}).encode()
+            elif route == '/policy':
+                body = POLICY_FIXTURE
+            elif route == '/frame':
                 body = b'<html><body><button onclick="this.textContent=\'Frame clicked\'">Frame button</button></body></html>'
             elif route == '/popup':
                 body = b'<html><head><title>Owned popup</title></head><body>Popup opened</body></html>'
@@ -478,8 +493,9 @@ async def test_service_compact_observation_is_smaller_and_actionable(site):
 
 
 @pytest.mark.asyncio
-async def test_service_rejects_stale_approval_and_drops_tab_cache(site):
+async def test_service_rejects_stale_approval_and_drops_tab_cache(site, monkeypatch):
     from browser_automation.service import BrowserService, ServiceError
+    monkeypatch.setenv('BROWSER_APPROVAL_MODE', 'strict')  # 'Free action' is an ordinary control: pauses only in strict.
     service = BrowserService()
     try:
         sid = (await service.dispatch('launch', {'headless': True}))['session_id']
@@ -502,6 +518,85 @@ async def test_service_rejects_stale_approval_and_drops_tab_cache(site):
             await service.dispatch('act', {**args, 'action': {'observation_id': observation['id'], 'operation': 'wait', 'seconds': 0}})
         assert old.value.code == 'unknown_observation'
         assert await service.sessions[sid]._page(tab).locator('#out').inner_text() == 'Changed elsewhere'
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_service_approval_modes_on_real_browser(site, tmp_path, monkeypatch):
+    from browser_automation.service import BrowserService
+    from browser_automation.approval_policy import CUSTOM_REASON, CLICK_REASON, KEY_REASON
+    approvals = tmp_path / 'approvals.json'
+    approvals.write_text('[]')
+    files = tmp_path / 'files'
+    files.mkdir()
+    (files / 'upload.txt').write_text('standing approval upload')
+    monkeypatch.setenv('BROWSER_APPROVALS_FILE', str(approvals))
+    monkeypatch.setenv('BROWSER_FILES_DIRECTORY', str(files))
+    destination = Path(os.environ.get('BROWSER_PROOF_DIR', tmp_path))
+    destination.mkdir(parents=True, exist_ok=True)
+    service = BrowserService()
+    try:
+        sid = (await service.dispatch('launch', {'headless': True}))['session_id']
+        tab = (await service.dispatch('new_tab', {'session_id': sid, 'url': site + 'policy'}))['tab']['id']
+        args = {'session_id': sid, 'tab_id': tab}
+        page = service.sessions[sid]._page(tab)
+        async def act(name, operation='click', **extra):
+            observation = await service.dispatch('observe', args)
+            target = next(e for e in observation['elements'] if e['name'] == name)['id']
+            return await service.dispatch('act', {**args, 'action': {'observation_id': observation['id'], 'operation': operation, 'target': target, **extra}})
+
+        monkeypatch.setenv('BROWSER_APPROVAL_MODE', 'strict')  # Legacy behaviour: ordinary controls pause.
+        assert (await act('Add'))['status'] == 'approval_required'
+        assert await page.locator('#count').inner_text() == 'Count 0'
+
+        monkeypatch.setenv('BROWSER_APPROVAL_MODE', 'standard')
+        added = await act('Add', settle_ms=0)
+        assert added['approval'] == {'source': 'host_policy', 'mode': 'standard', 'tier': 'ordinary', 'reason': CUSTOM_REASON}
+        assert await page.locator('#count').inner_text() == 'Count 1'
+        paused = await act('Delete')
+        assert paused['status'] == 'approval_required' and paused['tier'] == 'consequential'
+        assert await page.locator('#status').inner_text() == 'Kept'
+        assert (await act('Password', 'fill', text='never-typed'))['tier'] == 'critical'
+        filled = await act('Search query', 'fill', text='cats')
+        assert 'approval' not in filled
+        searched = await act('Search query', 'press', key='Enter')
+        assert searched['approval']['tier'] == 'ordinary' and searched['approval']['reason'] == KEY_REASON
+        assert searched['navigation']['started'] is True and searched['url'].endswith('/policy?q=cats')
+        posted = await service.dispatch('network_call', {**args, 'url': site + 'api', 'method': 'POST', 'json_body': {'ordinary': 'value'}})
+        assert posted['status'] == 'approval_required' and posted['approval_tier'] == 'consequential'
+        observation = await service.dispatch('observe', {**args, 'detail': 'full'})
+        await service.dispatch('navigate', {**args, 'url': site})
+        upload_observation = await service.dispatch('observe', args)
+        upload = {**args, 'observation_id': upload_observation['id'], 'target': next(e for e in upload_observation['elements'] if e['name'] == 'Upload fixture')['id'], 'paths': [str(files / 'upload.txt')]}
+        assert (await service.dispatch('upload', upload))['status'] == 'approval_required'
+        logout = await service.dispatch('navigate', {**args, 'url': site + 'logout'})
+        assert logout['status'] == 'approval_required' and logout['tier'] == 'consequential'
+
+        monkeypatch.setenv('BROWSER_APPROVAL_MODE', 'autonomous')
+        uploaded = await service.dispatch('upload', upload)
+        assert uploaded['count'] == 1 and uploaded['approval']['source'] == 'host_policy' and uploaded['approval']['tier'] == 'consequential'
+        assert await page.locator('input[type=file]').evaluate('(e)=>e.files[0].name') == 'upload.txt'
+        moved = await service.dispatch('navigate', {**args, 'url': site + 'policy'})
+        assert 'approval' not in moved and moved['navigation_status'] == 'complete'
+        deleted = await act('Delete', settle_ms=0)
+        assert deleted['approval'] == {'source': 'host_policy', 'mode': 'autonomous', 'tier': 'consequential', 'reason': CLICK_REASON}
+        assert await page.locator('#status').inner_text() == 'Deleted'
+        proof = await service.dispatch('observe', {**args, 'screenshot': True})
+        assert 'Deleted' in proof['text']
+        (destination / 'autonomous-delete-proof.png').write_bytes(base64.b64decode(proof['screenshot']))
+        critical = await act('Password', 'fill', text='never-typed')
+        assert critical['status'] == 'approval_required' and critical['tier'] == 'critical'
+        assert await page.locator('input[type=password]').input_value() == ''
+        executed = await service.dispatch('network_call', {**args, 'url': site + 'api', 'method': 'POST', 'json_body': {'ordinary': 'value'}})
+        assert executed['status'] == 200 and executed['approval']['tier'] == 'consequential' and executed['approval']['source'] == 'host_policy'
+        body = await service.dispatch('network_body', {**args, 'request_id': executed['request_id']})
+        assert json.loads(body['data']) == {'method': 'POST', 'received': '{"ordinary":"value"}'}
+        credential = await service.dispatch('network_call', {**args, 'url': site + 'api', 'headers': {'Authorization': 'Bearer private'}})
+        assert credential['status'] == 'approval_required' and credential['approval_tier'] == 'critical'
+        auto_logout = await service.dispatch('navigate', {**args, 'url': site + 'logout'})
+        assert auto_logout['approval']['source'] == 'host_policy' and auto_logout['tab']['url'] == site + 'logout'
+        assert observation['id'] not in {key[1] for key in service.snapshots}
     finally:
         await service.close()
 

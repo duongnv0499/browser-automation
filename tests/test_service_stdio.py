@@ -136,7 +136,8 @@ async def test_mcp_official_client_real_browser(tmp_path, local_page):
     approval_path.write_text("[]")
     allowed_directory = tmp_path / "allowed"
     allowed_directory.mkdir()
-    params = StdioServerParameters(command=sys.executable, args=["-m", "browser_automation.mcp"], env={**os.environ, "BROWSER_APPROVALS_FILE": str(approval_path), "BROWSER_FILES_DIRECTORY": str(allowed_directory)})
+    # strict reproduces the pre-mode policy this transport test exercises (the drag is an ordinary action).
+    params = StdioServerParameters(command=sys.executable, args=["-m", "browser_automation.mcp"], env={**os.environ, "BROWSER_APPROVALS_FILE": str(approval_path), "BROWSER_FILES_DIRECTORY": str(allowed_directory), "BROWSER_APPROVAL_MODE": "strict"})
     async with stdio_client(params) as (reader, writer):
         async with ClientSession(reader, writer) as client:
             initialized = await client.initialize()

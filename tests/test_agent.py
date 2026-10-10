@@ -540,3 +540,18 @@ async def test_browser_changed_region_diagnostic_survives_blocked_run():
     assert result["error_diagnostic"]["recommended_next_action"] == "reobserve"
     assert "Target pixels changed" in result["error_diagnostic"]["message"]
 
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["strict", "standard", "autonomous"])
+async def test_agent_run_honours_host_approval_mode_with_step_audit(mode):
+    session = Session()  # Element "Submit" (button): consequential tier.
+    result = await BrowserAgent(session, Provider("click"), approval_mode=mode, no_progress_limit=2).run("t1", "Submit")
+    if mode == "autonomous":
+        assert session.calls and result["status"] == "no_progress"
+        assert result["steps"][0]["approval"] == {"source": "host_policy", "mode": "autonomous", "tier": "consequential",
+                                                 "reason": "Potential submission, disclosure, account change, payment, or destructive action"}
+    else:
+        assert result["status"] == "approval_required" and not session.calls
+    granted = await BrowserAgent(Session(), Provider("click"), approval=lambda _: True, approval_mode=mode, no_progress_limit=2).run("t1", "Submit")
+    assert granted["steps"][0]["approval"]["source"] == ("host_policy" if mode == "autonomous" else "host_token")
