@@ -1,7 +1,7 @@
 {
   "goal": "Production browser automation plus real DevTools-equivalent request queries, headers, payloads and response bodies, context-authenticated internal API calls/replays and explicit multiple-tab workflows across CLI/MCP stdio/HTTP/OMP.",
   "parent_role": "Research initially; then PM, architecture and review only. Workers implement and repair owned paths.",
-  "git_owner": "NetworkDocs exclusively stages exact owner-approved paths, commits and pushes origin/main serially; no git add ., force/reset, or unrelated user paths.",
+  "git_owner": "Harness (autonomy round 2026-10-10) exclusively stages exact owner-approved paths, commits and pushes origin/main serially; no git add ./-A, force-push, reset, or doc.md/unrelated user paths. Prior rounds: NetworkDocs exclusively stages exact owner-approved paths, commits and pushes origin/main serially; no git add ., force/reset, or unrelated user paths.",
   "verification_gate": "All workers READY first; parent authorizes unified checks. No mid-flight tests/builds/lint/smokes.",
   "ownership": {
     "Harness": [
@@ -361,10 +361,124 @@
     "contracts_file": "agents/release-issues.json",
     "verification_summary": "152passed168.66s no skips/failures; uvbuild2.22s; clean installed-wheel actual browser+modern/legacyHTTP monitor+stdio progress PASS25.73s; no paid/native/macOS proof"
   },
-  "current_phase": {
+  "autonomy_round_2026_10_10": {
+    "goal": "Let agent clients (Claude, Codex, ...) control the browser autonomously without confirming every ordinary step, while keeping critical payment/credential actions per-action approved and preserving stale/covered/wrong-tab guards.",
+    "motivation_parent_review_2026_10_10": [
+      "1. Nearly every ordinary button click and Enter keypress pauses for interactive host approval (agent.py _approval_reason: 'Button/custom control may have consequential side effects').",
+      "2. No way to navigate an existing tab to a URL; only new_tab(url).",
+      "3. Service observation output is huge (Wikipedia ~50 KB, Hacker News ~111 KB JSON text without screenshot): every element carries bounds/frame/document; screenshot observations add 64 visual-region elements; text is viewport-clipped only.",
+      "4. Service never drops its snapshot cache after act, so a stale observation can mint a pending approval that only fails after the human approves it.",
+      "5. Covered (occluded) elements are listed without a flag; only act rejects them.",
+      "User explicitly approved fixing all of these with feature-sized commits pushed to origin/main."
+    ],
+    "features_in_order": [
+      {
+        "id": "F1",
+        "owner": "Autonomy",
+        "commit": "feat(browser): navigate owned tabs and settle after input",
+        "scope": "BrowserSession.navigate on session-owned tabs only (not_owned_tab error for user tabs), new_tab URL rules, snapshot invalidation, timeout keeps tab; navigate tool across service/MCP stdio+HTTP/CLI/OMP; act settle_ms (0..10000, default 1000 click/press/drag) with navigation {started,status,url} settle signal, never a success claim",
+        "status": "pending"
+      },
+      {
+        "id": "F2",
+        "owner": "Autonomy",
+        "commit": "fix(observe): reject stale approvals early and flag covered targets",
+        "scope": "service drops tab snapshots/pending actions after act/approved_act/navigate/run/upload/download/close_tab; BrowserSession.check_observation before approval_required; snapshot.js covered:true without operations the guard would reject; act guard stays authoritative",
+        "status": "pending"
+      },
+      {
+        "id": "F3",
+        "owner": "Autonomy",
+        "commit": "feat(observe): compact observation output for agent clients",
+        "scope": "observe detail compact|full (default compact), visual_regions (default false), text_scope viewport|document; full == current output; run result compacted unless detail=full; BrowserAgent/provider observations unchanged",
+        "status": "pending"
+      },
+      {
+        "id": "F4",
+        "owner": "Autonomy",
+        "commit": "feat(policy): host approval modes for autonomous agents",
+        "scope": "approval_policy.py; BROWSER_APPROVAL_MODE strict|standard|autonomous (default standard, invalid = clear error, doctor reports); tiers none|ordinary|consequential|critical; strict reproduces current behavior exactly; BROWSER_NETWORK_REQUIRE_APPROVAL=1 still forces network approval; approval {source host_policy|host_token, mode, tier, reason}",
+        "status": "pending"
+      },
+      {
+        "id": "F5",
+        "owner": "Harness",
+        "commit": "docs(release): document autonomy round and verification",
+        "scope": "README, CHANGELOG, docs/architecture.md, docs/research.md evidence, install.md (BROWSER_APPROVAL_MODE in MCP registration examples), skills/browser-automation/SKILL.md, AGENTS.md security wording (explicit approval = per-action host token OR host-configured standing approval mode; critical payment/credential actions always per-action), agents/workstreams.json",
+        "status": "pending"
+      }
+    ],
+    "ownership": {
+      "Autonomy": [
+        "src/browser_automation/browser.py",
+        "src/browser_automation/snapshot.js",
+        "src/browser_automation/service.py",
+        "src/browser_automation/mcp.py",
+        "src/browser_automation/cli.py",
+        "src/browser_automation/agent.py",
+        "src/browser_automation/page_state.py",
+        "src/browser_automation/browser_requests.py",
+        "src/browser_automation/approval_policy.py",
+        "integrations/omp/browser-tools.mjs",
+        "tests/**",
+        "docs/browser.md",
+        "docs/integrations.md",
+        "docs/network.md",
+        "docs/providers.md",
+        ".env.example",
+        "agents/autonomy.json"
+      ],
+      "Harness": [
+        "AGENTS.md",
+        "agents/workstreams.json",
+        "agents/worker-instructions.md",
+        "README.md",
+        "CHANGELOG.md",
+        "docs/architecture.md",
+        "docs/research.md",
+        "docs/http.md",
+        "install.md",
+        "skills/browser-automation/SKILL.md"
+      ],
+      "user_preserved": [
+        "doc.md (user's uncommitted edits; never edit or stage)"
+      ]
+    },
+    "process": "Strictly sequential features (service.py/mcp.py shared). Worker implements -> READY (no tests/builds/lint/smokes mid-flight) -> parent reviews diff -> parent authorizes scoped verification (worker runs it, repairs owned paths) -> worker sends Harness exact paths + message -> Harness commits/pushes origin/main and reports hash or concrete remote error -> next feature. Final: parent authorizes one unified suite + real-browser evidence, then Harness F5 commit.",
+    "verification_gate": "Command form (macOS): BROWSER_INTEGRATION_TESTS=1 uv run --extra http pytest <files> --basetemp=<scratch dir> -p no:cacheprovider. Never report unexecuted verification as passed; real-browser screenshots + rendered DOM outcome, stale/covered/wrong-tab rejection, user-tab preservation required for final acceptance.",
+    "baseline_evidence_2026_10_10": {
+      "environment": "macOS Darwin 27, Python 3.13 via uv, Playwright 1.63.0, Chromium headless shell v1243 installed by `uv run playwright install chromium`",
+      "command": "BROWSER_INTEGRATION_TESTS=1 uv run --extra http pytest -q -x",
+      "result": "1 failed, 186 passed in 124.84s",
+      "failure": "tests/test_service_omp.py::test_actual_omp_extension_load: locally installed omp CLI rejects --no-ui ('unknown flag: --no-ui'); environment/version mismatch, not a regression",
+      "full_non_x_run": "in progress (parent will report result)"
+    },
+    "acceptance": [
+      "navigate works on session-owned tabs only; user tabs rejected with not_owned_tab; URL rules match new_tab; timeout retains tab",
+      "act settle reports navigation {started,status,url} without waiting full timeout when no navigation occurs",
+      "stale observations are rejected before any pending approval is created; caches dropped after mutating tools",
+      "covered elements flagged and do not advertise guard-rejected operations; act guard remains authoritative; semantic stale digest remains correct",
+      "compact observation default with full backward-compatible; visual regions opt-in but still valid internally",
+      "BROWSER_APPROVAL_MODE strict reproduces previous behavior exactly; standard requires consequential+; autonomous requires only critical; critical payment/credential actions always per-action approved",
+      "results label auto-approved actions with approval {source, mode, tier, reason}",
+      "tools wired across service, MCP stdio/HTTP, CLI JSONL, OMP; docs and install examples updated",
+      "unified suite + real-browser evidence executed and recorded honestly; doc.md untouched",
+      "five feature commits pushed to origin/main in order"
+    ],
+    "commits": [],
+    "status": "Bootstrap: plan persisted; F1 implementation pending"
+  },
+  "network_devtools_phase_2026_10_09": {
     "feature": "network DevTools capabilities 2026-10-09",
     "phase": "Complete: six NetworkFlow lifecycle findings resolved; unified196passed299.70s no skips/failures, buildPASS2.48s, clean installed-wheel8passed33.15s across stdio/current+legacyHTTP/CLI actual browser workflow/cancellation. Main independently reviewed installed PNG/server evidence; exact final docs/state commit and origin/main push authorized",
     "active_tracker": "agents/network-devtools.json",
     "historical_sections": "Earlier release sections and counts remain historical evidence, not acceptance of the current network cutover"
+  },
+  "current_phase": {
+    "feature": "autonomy round 2026-10-10",
+    "phase": "Bootstrap: plan persisted; F1 (navigate/settle) pending with Autonomy worker",
+    "active_section": "autonomy_round_2026_10_10",
+    "active_tracker": "agents/autonomy.json",
+    "historical_sections": "network_devtools_phase_2026_10_09 and earlier sections remain historical evidence, not acceptance of this round"
   }
 }
