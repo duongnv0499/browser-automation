@@ -114,6 +114,7 @@ async def test_load_timeout_retains_observable_owned_tab():
             assert any(e['name'] == 'Rendered before load' for e in observation['elements'])
             result = await browser.act(tab['id'], {'operation': 'reload', 'observation_id': observation['id'], 'wait_until': 'load', 'timeout_ms': 500})
             assert result['navigation_status'] == 'timeout'
+            assert result['navigation']['started'] is True and result['navigation']['status'] == 'timeout'
             await browser.close_tab(tab['id'])
             assert not any(t['id'] == tab['id'] for t in await browser.tabs())
     finally:

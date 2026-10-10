@@ -1,0 +1,122 @@
+{
+ "owner": "Autonomy",
+ "round": "autonomy-2026-10-10",
+ "contract": "/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/round-contract.md",
+ "owned_paths": [
+  "src/browser_automation/browser.py",
+  "src/browser_automation/snapshot.js",
+  "src/browser_automation/service.py",
+  "src/browser_automation/mcp.py",
+  "src/browser_automation/cli.py",
+  "src/browser_automation/agent.py",
+  "src/browser_automation/page_state.py",
+  "src/browser_automation/browser_requests.py",
+  "src/browser_automation/approval_policy.py",
+  "integrations/omp/browser-tools.mjs",
+  "tests/**",
+  "docs/browser.md",
+  "docs/integrations.md",
+  "docs/network.md",
+  "docs/providers.md",
+  ".env.example",
+  "agents/autonomy.json"
+ ],
+ "never_touch": [
+  "doc.md",
+  "AGENTS.md",
+  "agents/workstreams.json",
+  "agents/worker-instructions.md",
+  "README.md",
+  "CHANGELOG.md",
+  "docs/architecture.md",
+  "docs/research.md",
+  "docs/http.md",
+  "install.md",
+  "skills/browser-automation/SKILL.md"
+ ],
+ "features": {
+  "F1": "VERIFIED_awaiting_GitOwner_commit",
+  "F2": "not_started",
+  "F3": "not_started",
+  "F4": "not_started"
+ },
+ "current_feature": "F1 navigation + act settle (commit: feat(browser): navigate owned tabs and settle after input)",
+ "decisions": {
+  "navigate_ownership": "BrowserSession.navigate accepts only pages in _owned (new_tab or popups of owned tabs) in both attached and isolated sessions; otherwise NotOwnedTabError(UnsafeActionError) code not_owned_tab, recommended_next_action new_tab",
+  "navigate_url_rules": "Destination must pass BrowserSession._allowed_url (HTTP(S) with host or about:blank); service additionally applies web_url -> prohibited_url before any browser call",
+  "navigate_current_url": "An owned tab currently on a protected document (e.g. chrome-error after failed navigation) may be navigated away; nothing of the protected page is read. Service does not apply the current-tab web_url check to navigate for that reason",
+  "navigate_lifecycle": "Snapshots of the tab invalidated before goto (browser) and service cache/pending approvals for the tab dropped; Playwright TimeoutError -> navigation_status timeout + navigation_timeout diagnostic, tab retained; hard failure -> BrowserError code navigation_failed, owned tab retained (not closed, unlike new_tab which created it)",
+  "settle_detection": "Public Playwright page events only, registered before input: request (is_navigation_request and frame is main frame) = cross-document navigation started; framenavigated(main frame) = commit (same-document when no navigation request preceded it); requestfailed/requestfinished of that request, download, close = ended. Settle window ends as soon as a navigation starts; otherwise after settle_ms with started false and no further waiting",
+  "settle_wait": "Started cross-document: wait for commit (or end of request + 250ms grace) then wait_for_load_state(domcontentloaded), whole wait bounded by timeout_ms. Same-document: no document load to wait for -> status complete immediately. Request ended without commit (204, download, abort): status none + reason not_committed. Page closed: status none + reason page_closed",
+  "settle_defaults": "settle_ms default 1000 for click/press/drag, 0 otherwise; zero still reports a navigation already started during dispatch. timeout_ms (1..120000, default 15000) validated for every operation; reload keeps its own navigation_status/wait_until",
+  "navigation_result": "act result always includes navigation {started, status none|complete|timeout, url} (+reason when a started navigation did not commit or page closed, +timeout_ms diagnostic on timeout). It is a settle signal, never task success",
+  "navigate_failure_service_cache": "Service drops tab cache on navigate success and on failures other than not_owned_tab/invalid_argument",
+  "result_extensions": "Additive to contract: navigation.reason (not_committed|page_closed) and navigation.diagnostic on timeout; NavigationFailedError code navigation_failed for hard goto failures"
+ },
+ "research": [
+  {
+   "url": "https://playwright.dev/python/docs/api/class-page",
+   "accessed": "2026-10-10",
+   "facts": "goto wait_until commit/domcontentloaded/load(default)/networkidle(discouraged); same-URL hash navigation succeeds and returns None; timeout default 30000; wait_for_load_state resolves immediately when current document already reached the state; wait_for_event/expect_event throw when page closes; on('framenavigated') emitted when a frame navigates to a new url; main_frame persists during navigations"
+  },
+  {
+   "url": "file:.venv/lib/python3.13/site-packages/playwright/_impl/_frame.py (playwright 1.63.0)",
+   "accessed": "2026-10-10",
+   "facts": "client keeps per-frame _load_states updated by loadstate add/remove; page framenavigated is emitted only for navigated events without error; expect_navigation waits for any navigated event then load state"
+  },
+  {
+   "url": "file:.venv/lib/python3.13/site-packages/playwright/driver/package/lib/coreBundle.js (playwright 1.63.0 server)",
+   "accessed": "2026-10-10",
+   "facts": "frameCommittedNewDocumentNavigation calls _onClearLifecycle before firing the navigation event, so wait_for_load_state after a new-document framenavigated waits for the new document; frameCommittedSameDocumentNavigation fires navigated without clearing lifecycle; aborted navigations fire an error event that is not a public framenavigated"
+  }
+ ],
+ "implementation_state": {
+  "F1": "implemented, parent-approved design, verified 2026-10-10",
+  "F1_changed": [
+   "src/browser_automation/browser.py",
+   "src/browser_automation/service.py",
+   "src/browser_automation/mcp.py",
+   "integrations/omp/browser-tools.mjs",
+   "tests/test_browser.py",
+   "tests/test_browser_observation.py",
+   "tests/test_service.py",
+   "tests/test_service_stdio.py",
+   "docs/browser.md",
+   "docs/integrations.md",
+   "agents/autonomy.json",
+   "tests/test_service_stdio.py: subprocess StreamReader limit=64 MiB (LINE_LIMIT) fixes macOS 'Separator is found, but chunk is longer than limit' for screenshot JSON lines"
+  ],
+  "cli_jsonl": "json_lines dispatch is generic (service.dispatch validates against mcp.TOOLS); no cli.py change needed. HTTP reuses mcp.TOOLS + service.dispatch"
+ },
+ "requested_verification": "F1 done; next verification after F2 implementation",
+ "blockers": [],
+ "verification": {
+  "F1": {
+   "date": "2026-10-10",
+   "environment": "macOS Darwin 27.0.0, Python 3.13 .venv, playwright 1.63.0, headless Chromium (isolated launch + throwaway external CDP Chromium); no native user Chrome, no live provider",
+   "suite": {
+    "command": "BROWSER_PROOF_DIR=/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/proof BROWSER_INTEGRATION_TESTS=1 uv run --extra http pytest tests/test_browser.py tests/test_browser_observation.py tests/test_service.py tests/test_service_stdio.py tests/test_agent_surface.py tests/test_network_surface.py --basetemp=/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/f1 -p no:cacheprovider",
+    "result": "82 passed, 0 failed, 63.74s",
+    "note": "BROWSER_PROOF_DIR only redirects proof file output"
+   },
+   "screenshots_viewed": [
+    "/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/proof/navigate-proof.png (Navigation fixture rendered after navigate)",
+    "/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/f1/test_cli_navigate_owned_tab_an0/cli-navigated-after.png (Rendered SUCCESS after hash-link click via JSONL)",
+    "/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/smoke/smoke-second.png (Second page rendered after MCP link click)"
+   ],
+   "mcp_stdio_smoke": {
+    "command": "uv --directory <repo> run python -I /private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/f1_mcp_smoke.py /private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/smoke (spawns `uv --directory <repo> run browser-agent-mcp`, raw JSON-RPC, headless launch, local 127.0.0.1 fixture)",
+    "result": "pass",
+    "navigate": "navigation_status complete, title 'Smoke start', 27.6 ms tool round trip",
+    "act_click_link": "navigation {started:true,status:complete,url:/second}, act latency_ms 25.1 (settle window ended early on navigation start)",
+    "fresh_observe": "title 'Smoke second', heading 'Second page rendered'",
+    "screenshots": [
+     "/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/smoke/smoke-start.png",
+     "/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/smoke/smoke-second.png"
+    ],
+    "latency_kind": "browser-only local tool latency; not provider/model latency"
+   },
+   "out_of_scope": "tests/test_service_omp.py::test_actual_omp_extension_load not run (local omp 18.2.1 rejects --no-ui; parent-designated out of scope)"
+  }
+ }
+}

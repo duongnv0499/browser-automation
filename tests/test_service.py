@@ -30,6 +30,9 @@ class Session:
         self.closed = True
     async def close_tab(self, tab_id):
         pass
+    async def navigate(self, tab_id, url, wait_until="domcontentloaded", timeout_ms=15000):
+        self.navigated = (tab_id, url, wait_until, timeout_ms)
+        return {"tab": {"id": tab_id, "url": url, "title": "Moved"}, "navigation_status": "complete", "wait_until": wait_until}
 
 
 def service_with_session():
@@ -170,3 +173,36 @@ async def test_targeted_url_check_does_not_enumerate_other_tabs():
         raise AssertionError("Unrelated tab title reads are not needed")
     session.tabs = forbidden_tabs
     await service.dispatch("observe", {"session_id": "s", "tab_id": "t"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("url", ["file:///tmp/secret", "data:text/plain,secret", "chrome://settings", "javascript:alert(1)"])
+async def test_navigate_prohibited_url_denied_before_browser(url):
+    service, session = service_with_session()
+    with pytest.raises(ServiceError) as error:
+        await service.dispatch("navigate", {"session_id": "s", "tab_id": "t", "url": url})
+    assert error.value.code == "prohibited_url"
+    assert not hasattr(session, "navigated")
+
+
+@pytest.mark.asyncio
+async def test_navigate_drops_tab_observations_and_paused_approvals():
+    from browser_automation.mcp import validate_arguments
+    service, session = service_with_session()
+    await service.dispatch("observe", {"session_id": "s", "tab_id": "t"})
+    paused = await service.dispatch("act", {"session_id": "s", "tab_id": "t", "action": {"observation_id": "revision", "operation": "click", "target": "button", "settle_ms": 0}})
+    assert paused["status"] == "approval_required" and service.pending_actions
+    moved = await service.dispatch("navigate", {"session_id": "s", "tab_id": "t", "url": "https://example.com/next", "timeout_ms": 500})
+    assert moved["tab"]["url"] == "https://example.com/next" and session.navigated == ("t", "https://example.com/next", "domcontentloaded", 500)
+    assert not service.snapshots and not service.pending_actions
+    with pytest.raises(ServiceError) as stale:
+        await service.dispatch("act", {"session_id": "s", "tab_id": "t", "action": {"observation_id": "revision", "operation": "wait"}})
+    assert stale.value.code == "unknown_observation"
+    for bad in ({"session_id": "s", "tab_id": "t"}, {"session_id": "s", "tab_id": "t", "url": "https://example.com", "wait_until": "networkidle"}):
+        with pytest.raises(ServiceError) as invalid:
+            validate_arguments("navigate", bad)
+        assert invalid.value.code == "invalid_argument"
+    for settle in (-1, 10001, 1.5, True):
+        with pytest.raises(ServiceError):
+            validate_arguments("act", {"session_id": "s", "tab_id": "t", "action": {"observation_id": "r", "operation": "click", "target": "x", "settle_ms": settle}})
+    validate_arguments("act", {"session_id": "s", "tab_id": "t", "action": {"observation_id": "r", "operation": "click", "target": "x", "settle_ms": 0}})

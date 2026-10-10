@@ -12,8 +12,19 @@ import pytest_asyncio
 from playwright.async_api import async_playwright
 
 from browser_automation.browser import (
-    BrowserSession, ConsentRequiredError, StaleObservationError, UnsafeActionError,
+    BrowserError, BrowserSession, ConsentRequiredError, NotOwnedTabError, StaleObservationError, UnsafeActionError,
 )
+
+
+NAV_FIXTURE = b'''<!doctype html><html><head><title>Navigation fixture</title><style>body{font:18px sans-serif;margin:20px}a,button{display:block;margin:8px 0;padding:8px}</style></head><body>
+<h1 id="state">Navigation start</h1>
+<a href="/popup">Go to popup page</a>
+<a href="#section">Jump to section</a>
+<button onclick="history.pushState({},'','/nav/pushed');document.querySelector('#state').textContent='Pushed state'">Push state</button>
+<button onclick="document.querySelector('#state').textContent='Stayed here'">Stay here</button>
+<a href="/slow">Slow page</a>
+<div id="section">Section anchor</div>
+</body></html>'''
 
 
 @pytest_asyncio.fixture
@@ -46,6 +57,11 @@ async def site():
                 body = b'<html><body><button onclick="this.textContent=\'Frame clicked\'">Frame button</button></body></html>'
             elif route == '/popup':
                 body = b'<html><head><title>Owned popup</title></head><body>Popup opened</body></html>'
+            elif route == '/nav':
+                body = NAV_FIXTURE
+            elif route == '/slow':
+                await asyncio.sleep(2)
+                body = b'<html><head><title>Slow page</title></head><body>Slow page loaded</body></html>'
             elif route == '/download':
                 body = b'real downloadable fixture\n'
                 headers = 'Content-Disposition: attachment; filename="fixture.txt"\r\n'
@@ -53,9 +69,14 @@ async def site():
                 body = main.replace('PORT', str(port)).encode()
             writer.write(f'HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {len(body)}\r\nConnection: close\r\n{headers}\r\n'.encode() + body)
             await writer.drain()
+        except (ConnectionError, asyncio.IncompleteReadError):
+            pass  # The browser may abandon a deliberately slow fixture response.
         finally:
             writer.close()
-            await writer.wait_closed()
+            try:
+                await writer.wait_closed()
+            except ConnectionError:
+                pass
 
     server = await asyncio.start_server(handle, '0.0.0.0', 0)
     port = server.sockets[0].getsockname()[1]
@@ -224,6 +245,82 @@ async def test_upload_download_scopes_and_approval(browser,tmp_path):
     assert destination.read_text() == 'real downloadable fixture\n'
 
 
+@pytest.mark.asyncio
+async def test_navigate_owned_tab_renders_and_invalidates(browser, site, tmp_path):
+    session, tab = browser
+    page = session._page(tab)
+    before = await session.observe(tab, screenshot=True)
+    result = await session.navigate(tab, site + 'nav')
+    assert result == {'tab': {'id': tab, 'url': site + 'nav', 'title': 'Navigation fixture'}, 'navigation_status': 'complete', 'wait_until': 'domcontentloaded'}
+    with pytest.raises(StaleObservationError):
+        await session.act(tab, {'operation': 'wait', 'seconds': 0, 'observation_id': before['id']})
+    after = await session.observe(tab, screenshot=True)
+    assert after['url'] == site + 'nav' and 'Navigation start' in after['text'] and 'Real browser fixture' not in after['text']
+    assert await page.locator('#state').inner_text() == 'Navigation start'
+    png = base64.b64decode(after['screenshot'])
+    assert png.startswith(b'\x89PNG') and after['screenshot'] != before['screenshot']
+    destination = Path(os.environ.get('BROWSER_PROOF_DIR', tmp_path))
+    destination.mkdir(parents=True, exist_ok=True)
+    (destination / 'navigate-proof.png').write_bytes(png)
+    for url in ('file:///etc/passwd', 'chrome://settings', 'javascript:alert(1)', 'data:text/html,x', 'http:///nohost'):
+        with pytest.raises(UnsafeActionError):
+            await session.navigate(tab, url)
+    with pytest.raises(BrowserError):
+        await session.navigate(tab, site, wait_until='networkidle')
+    with pytest.raises(BrowserError):
+        await session.navigate(tab, site, timeout_ms=0)
+    assert await session.tab_url(tab) == site + 'nav'
+    popup_result = await act(session, tab, 'Go to popup page')
+    assert popup_result['url'] == site + 'popup'
+    timed = await session.navigate(tab, site + 'slow', timeout_ms=300)
+    assert timed['navigation_status'] == 'timeout' and timed['diagnostic'] == {'code': 'navigation_timeout', 'timeout_ms': 300, 'message': 'Owned tab retained; observe the partially loaded page before choosing another action'}
+    assert any(t['id'] == tab for t in await session.tabs())
+
+
+@pytest.mark.asyncio
+async def test_act_settle_reports_navigation_without_full_timeout(browser, site):
+    session, tab = browser
+    await session.navigate(tab, site + 'nav')
+    observation = await session.observe(tab)
+    started = time.perf_counter()
+    stay = await session.act(tab, {'operation': 'click', 'observation_id': observation['id'], 'target': element(observation, 'Stay here')['id']})
+    elapsed = time.perf_counter() - started
+    # Default 1000 ms settle window only; never the 15000 ms navigation timeout.
+    assert stay['navigation'] == {'started': False, 'status': 'none', 'url': site + 'nav'}
+    assert elapsed < 4, elapsed
+    assert 'Stayed here' in (await session.observe(tab))['text']
+    observation = await session.observe(tab)
+    started = time.perf_counter()
+    quick = await session.act(tab, {'operation': 'click', 'observation_id': observation['id'], 'target': element(observation, 'Stay here')['id'], 'settle_ms': 0})
+    assert quick['navigation']['started'] is False and time.perf_counter() - started < 2
+    observation = await session.observe(tab)
+    with pytest.raises(UnsafeActionError, match='settle_ms'):
+        await session.act(tab, {'operation': 'click', 'observation_id': observation['id'], 'target': element(observation, 'Stay here')['id'], 'settle_ms': 10001})
+    pushed = await session.act(tab, {'operation': 'click', 'observation_id': observation['id'], 'target': element(observation, 'Push state')['id']})
+    assert pushed['navigation'] == {'started': True, 'status': 'complete', 'url': site + 'nav/pushed'}
+    assert pushed['latency_ms'] < 900, pushed  # same-document commit ends the settle window early
+    assert 'Pushed state' in (await session.observe(tab))['text']
+    await session.navigate(tab, site + 'nav')
+    observation = await session.observe(tab)
+    jumped = await session.act(tab, {'operation': 'click', 'observation_id': observation['id'], 'target': element(observation, 'Jump to section')['id']})
+    assert jumped['navigation'] == {'started': True, 'status': 'complete', 'url': site + 'nav#section'}
+    observation = await session.observe(tab)
+    linked = await session.act(tab, {'operation': 'click', 'observation_id': observation['id'], 'target': element(observation, 'Go to popup page')['id']})
+    assert linked['navigation'] == {'started': True, 'status': 'complete', 'url': site + 'popup'} and linked['url'] == site + 'popup'
+    with pytest.raises(StaleObservationError):
+        await session.act(tab, {'operation': 'wait', 'seconds': 0, 'observation_id': observation['id']})
+    rendered = await session.observe(tab)
+    assert rendered['url'] == site + 'popup' and 'Popup opened' in rendered['text']
+    await session.navigate(tab, site + 'nav')
+    observation = await session.observe(tab)
+    started = time.perf_counter()
+    slow = await session.act(tab, {'operation': 'click', 'observation_id': observation['id'], 'target': element(observation, 'Slow page')['id'], 'timeout_ms': 400})
+    assert time.perf_counter() - started < 1.9
+    assert slow['navigation']['started'] is True and slow['navigation']['status'] == 'timeout'
+    assert slow['navigation']['diagnostic']['code'] == 'navigation_timeout'
+    assert any(t['id'] == tab for t in await session.tabs())
+
+
 @pytest_asyncio.fixture
 async def external_chrome(tmp_path):
     async with async_playwright() as pw:
@@ -271,6 +368,26 @@ async def test_attached_disconnect_preserves_user_tabs(external_chrome,site):
         await again.close()
     async with httpx.AsyncClient() as client:
         assert (await client.get(endpoint+'/json/version')).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_navigate_refuses_preexisting_user_tab(external_chrome, site):
+    endpoint, profile = external_chrome
+    session = await BrowserSession.connect(endpoint)
+    try:
+        original = (await session.tabs())[0]
+        with pytest.raises(NotOwnedTabError) as refused:
+            await session.navigate(original['id'], site)
+        assert refused.value.code == 'not_owned_tab' and refused.value.recommended_next_action == 'new_tab'
+        assert await session.tab_url(original['id']) == 'about:blank'
+        owned = await session.new_tab()
+        moved = await session.navigate(owned['id'], site + 'nav')
+        assert moved['navigation_status'] == 'complete' and moved['tab']['title'] == 'Navigation fixture'
+        tabs = {t['id']: t['url'] for t in await session.tabs()}
+        assert tabs[original['id']] == 'about:blank' and tabs[owned['id']] == site + 'nav'
+        await session.close_tab(owned['id'])
+    finally:
+        await session.close()
 
 
 @pytest.mark.asyncio

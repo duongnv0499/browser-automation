@@ -10,6 +10,8 @@ import time
 import pytest_asyncio
 import pytest
 
+# Screenshot observations are single JSON lines larger than asyncio's 64 KiB default.
+LINE_LIMIT = 64 * 1024 * 1024
 pytestmark = [pytest.mark.asyncio, pytest.mark.skipif(os.environ.get("BROWSER_INTEGRATION_TESTS") != "1", reason="Final integration verification opt-in")]
 HTML = '''<!doctype html><title>Transport proof</title><h1>Visible fixture</h1>
 <a href="#result" onclick="document.querySelector('h1').textContent='Rendered SUCCESS'">Show result</a>
@@ -48,7 +50,7 @@ async def cli_call(process, command, arguments, identifier):
 
 
 async def test_cli_persistent_real_browser(tmp_path, local_page):
-    process = await asyncio.create_subprocess_exec(sys.executable, "-m", "browser_automation", "serve", stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    process = await asyncio.create_subprocess_exec(sys.executable, "-m", "browser_automation", "serve", stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, limit=LINE_LIMIT)
     try:
         opened = await cli_call(process, "launch", {"headless": True}, 1)
         sid = opened["session_id"]
@@ -88,6 +90,45 @@ async def test_cli_persistent_real_browser(tmp_path, local_page):
     assert process.returncode == 0, (await process.stderr.read()).decode()
 
 
+async def test_cli_navigate_owned_tab_and_settle(tmp_path, local_page):
+    process = await asyncio.create_subprocess_exec(sys.executable, "-m", "browser_automation", "serve", stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, limit=LINE_LIMIT)
+    async def failed(command, arguments, identifier):
+        process.stdin.write((json.dumps({"id": identifier, "command": command, "arguments": arguments}) + "\n").encode())
+        await process.stdin.drain()
+        response = json.loads(await asyncio.wait_for(process.stdout.readline(), 30))
+        assert response.get("id") == identifier and "error" in response, response
+        return response["error"]
+    try:
+        sid = (await cli_call(process, "launch", {"headless": True}, 1))["session_id"]
+        tab = (await cli_call(process, "new_tab", {"session_id": sid}, 2))["tab"]
+        args = {"session_id": sid, "tab_id": tab["id"]}
+        blank = await cli_call(process, "observe", {**args, "screenshot": True}, 3)
+        moved = await cli_call(process, "navigate", {**args, "url": local_page}, 4)
+        assert moved == {"tab": {"id": tab["id"], "url": local_page, "title": "Transport proof"}, "navigation_status": "complete", "wait_until": "domcontentloaded"}
+        stale = await failed("act", {**args, "action": {"observation_id": blank["id"], "operation": "wait", "seconds": 0}}, 5)
+        assert stale["code"] == "unknown_observation" and stale["recommended_next_action"] == "reobserve"
+        secret = tmp_path / "secret.txt"
+        secret.write_text("HOST_SECRET_NOT_BROWSER_CONTENT")
+        denied = await failed("navigate", {**args, "url": secret.as_uri()}, 6)
+        assert denied["code"] == "prohibited_url" and "HOST_SECRET" not in json.dumps(denied)
+        obs = await cli_call(process, "observe", {**args, "screenshot": True}, 7)
+        assert obs["url"] == local_page and "Visible fixture" in obs["text"]
+        png = base64.b64decode(obs["screenshot"])
+        assert png.startswith(b"\x89PNG\r\n\x1a\n") and obs["screenshot"] != blank["screenshot"]
+        (tmp_path / "cli-navigated.png").write_bytes(png)
+        target = next(e for e in obs["elements"] if e["name"] == "Show result")
+        clicked = await cli_call(process, "act", {**args, "action": {"observation_id": obs["id"], "operation": "click", "target": target["id"]}}, 8)
+        assert clicked["navigation"] == {"started": True, "status": "complete", "url": local_page + "#result"}
+        after = await cli_call(process, "observe", {**args, "screenshot": True}, 9)
+        assert "Rendered SUCCESS" in after["text"]
+        (tmp_path / "cli-navigated-after.png").write_bytes(base64.b64decode(after["screenshot"]))
+        await cli_call(process, "close", {"session_id": sid}, 10)
+    finally:
+        process.stdin.close()
+        await asyncio.wait_for(process.wait(), 15)
+    assert process.returncode == 0, (await process.stderr.read()).decode()
+
+
 async def test_mcp_official_client_real_browser(tmp_path, local_page):
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
@@ -101,9 +142,11 @@ async def test_mcp_official_client_real_browser(tmp_path, local_page):
             initialized = await client.initialize()
             assert initialized.model_dump(by_alias=True)["serverInfo"]["name"] == "browser-automation"
             tools = await client.list_tools()
-            assert {"observe", "act", "connect_default", "approved_act"} <= {tool.name for tool in tools.tools}
+            assert {"observe", "act", "connect_default", "approved_act", "navigate"} <= {tool.name for tool in tools.tools}
             action_properties = next(t.model_dump(by_alias=True)["inputSchema"] for t in tools.tools if t.name == "act")["properties"]["action"]["properties"]
-            assert {"to_target", "to_x", "to_y", "delta_x", "delta_y", "seconds"} <= set(action_properties)
+            assert {"to_target", "to_x", "to_y", "delta_x", "delta_y", "seconds", "settle_ms"} <= set(action_properties)
+            navigate_schema = next(t.model_dump(by_alias=True)["inputSchema"] for t in tools.tools if t.name == "navigate")
+            assert set(navigate_schema["required"]) == {"session_id", "tab_id", "url"}
             async def call(name, arguments):
                 result = (await client.call_tool(name, arguments)).model_dump(by_alias=True)
                 assert not result["isError"], result
@@ -196,7 +239,7 @@ async def test_cli_text_only_local_decisions_loop(local_page, flags):
     async with server:
         endpoint = f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}/decisions"
         env = {**os.environ, "OPENROUTER_API_KEY": "local-test-fixture-not-live", "BROWSER_AGENT_VISION": "false", "BROWSER_AGENT_DECISIONS_ENDPOINT": endpoint}
-        process = await asyncio.create_subprocess_exec(sys.executable, "-m", "browser_automation", "run", "--isolated", "--headless", "--url", local_page, *flags, "Read the Visible fixture page", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env)
+        process = await asyncio.create_subprocess_exec(sys.executable, "-m", "browser_automation", "run", "--isolated", "--headless", "--url", local_page, *flags, "Read the Visible fixture page", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env, limit=LINE_LIMIT)
         output, errors = await asyncio.wait_for(process.communicate(), 45)
     assert process.returncode == 0, errors.decode()
     result = json.loads(output)
@@ -243,8 +286,11 @@ async def test_mcp_attached_browser_preserves_preexisting_tab(tmp_path, local_pa
                     (tmp_path / "mcp-attached.png").write_bytes(base64.b64decode(next(block["data"] for block in result["content"] if block["type"] == "image")))
                     forbidden = (await client.call_tool("close_tab", args)).model_dump(by_alias=True)
                     assert forbidden["isError"], "Service must not close a preexisting user tab"
+                    refused = (await client.call_tool("navigate", {**args, "url": local_page + "?moved"})).model_dump(by_alias=True)
+                    assert refused["isError"] and refused["structuredContent"]["error"]["code"] == "not_owned_tab"
+                    assert refused["structuredContent"]["error"]["recommended_next_action"] == "new_tab"
                     await call("close", {"session_id": opened["session_id"]})
-            assert browser.is_connected() and not original.is_closed()
+            assert browser.is_connected() and not original.is_closed() and original.url == local_page
             assert await original.locator("h1").inner_text() == "CDP preexisting session"
             assert (await context.cookies())[0]["value"] == "fixture-user"
         finally:

@@ -49,6 +49,133 @@ class ConsentRequiredError(BrowserError):
     code = "consent_required"
 
 
+class NotOwnedTabError(UnsafeActionError):
+    """Preexisting user tabs are never navigated away; open an owned tab instead."""
+    code = "not_owned_tab"
+    recommended_next_action = "new_tab"
+
+
+class NavigationFailedError(BrowserError):
+    code = "navigation_failed"
+
+
+class _NavigationWatch:
+    """Main-frame navigation signals around one input, from public Playwright page events only.
+
+    A main-frame navigation request marks a cross-document navigation as started;
+    framenavigated marks a commit (same-document when no request preceded it).
+    """
+
+    def __init__(self, page: Any):
+        self.page = page
+        self.main = page.main_frame
+        self.request: Any = None
+        self.started = asyncio.Event()
+        self.committed = asyncio.Event()
+        self.ended = asyncio.Event()
+        self.wake = asyncio.Event()
+        self.closed = False
+        self._listeners = [('request', self._on_request), ('framenavigated', self._on_navigated),
+                           ('requestfailed', self._on_end), ('requestfinished', self._on_end),
+                           ('download', self._on_download), ('close', self._on_close)]
+        for event, callback in self._listeners:
+            page.on(event, callback)
+
+    def _on_request(self, request: Any) -> None:
+        try:
+            main = request.is_navigation_request() and request.frame == self.main
+        except PlaywrightError:
+            main = False
+        if main:
+            self.request = request
+            self.committed.clear()
+            self.ended.clear()
+            self.started.set()
+            self.wake.set()
+
+    def _on_navigated(self, frame: Any) -> None:
+        if frame == self.main:
+            self.committed.set()
+            self.started.set()
+            self.wake.set()
+
+    def _on_end(self, request: Any) -> None:
+        if request is self.request:
+            self.ended.set()
+
+    def _on_download(self, _download: Any) -> None:
+        if self.request is not None:
+            self.ended.set()
+
+    def _on_close(self, _page: Any) -> None:
+        self.closed = True
+        self.ended.set()
+        self.wake.set()
+
+    def dispose(self) -> None:
+        for event, callback in self._listeners:
+            try:
+                self.page.remove_listener(event, callback)
+            except Exception:
+                pass
+
+    async def settle(self, settle_ms: int, timeout_ms: int) -> dict[str, Any]:
+        """Report whether input started a main-frame navigation; never a success claim."""
+        if settle_ms and not self.wake.is_set():
+            try:
+                await asyncio.wait_for(self.wake.wait(), settle_ms / 1000)
+            except TimeoutError:
+                pass
+        if self.closed:
+            return {'started': self.started.is_set(), 'status': 'none', 'url': self.page.url, 'reason': 'page_closed'}
+        if not self.started.is_set():
+            return {'started': False, 'status': 'none', 'url': self.page.url}
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_ms / 1000
+
+        def remaining() -> float:
+            return max(0.0, deadline - loop.time())
+
+        async def until(*events: asyncio.Event, limit: float) -> None:
+            waiters = [asyncio.ensure_future(event.wait()) for event in events]
+            try:
+                await asyncio.wait(waiters, timeout=limit, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                for waiter in waiters:
+                    waiter.cancel()
+
+        timeout = {'started': True, 'status': 'timeout', 'url': self.page.url, 'diagnostic': {'code': 'navigation_timeout', 'timeout_ms': timeout_ms, 'message': 'Navigation did not reach domcontentloaded; observe the retained tab before choosing another action'}}
+        if self.request is not None and not self.committed.is_set():
+            # Cross-document: wait for the commit, or for the request (and any
+            # redirect hop that replaces it) to end without one. A short grace
+            # covers a finish event delivered just before its commit.
+            while not self.committed.is_set() and not self.closed and remaining() > 0:
+                if not self.ended.is_set():
+                    await until(self.committed, self.ended, limit=remaining())
+                    continue
+                await until(self.committed, limit=min(0.25, remaining()))
+                if self.ended.is_set():
+                    break
+            if self.closed:
+                return {'started': True, 'status': 'none', 'url': self.page.url, 'reason': 'page_closed'}
+            if not self.committed.is_set():
+                if self.ended.is_set():
+                    return {'started': True, 'status': 'none', 'url': self.page.url, 'reason': 'not_committed'}
+                timeout['url'] = self.page.url
+                return timeout
+        # Same-document commits already satisfy domcontentloaded; new documents wait for it.
+        try:
+            await self.page.wait_for_load_state('domcontentloaded', timeout=max(1.0, remaining() * 1000))
+        except PlaywrightTimeoutError:
+            timeout['url'] = self.page.url
+            return timeout
+        except PlaywrightError:
+            if self.closed or self.page.is_closed():
+                return {'started': True, 'status': 'none', 'url': self.page.url, 'reason': 'page_closed'}
+            raise
+        return {'started': True, 'status': 'complete', 'url': self.page.url}
+
+
 @dataclass
 class _Target:
     frame: Any
@@ -398,6 +525,33 @@ class BrowserSession:
                 self._sync_pages()
                 raise
             result = {'id': self._ids[page], 'url': page.url, 'title': await page.title(), 'navigation_status': status, 'wait_until': wait_until}
+            if status == 'timeout':
+                result['diagnostic'] = {'code': 'navigation_timeout', 'timeout_ms': timeout_ms, 'message': 'Owned tab retained; observe the partially loaded page before choosing another action'}
+            return result
+
+    async def navigate(self, tab_id: str, url: str, wait_until: str = 'domcontentloaded', timeout_ms: int = 15000) -> dict[str, Any]:
+        """Navigate a session-owned tab. Preexisting user tabs are never navigated away."""
+        self._navigation_options(wait_until, timeout_ms)
+        if not isinstance(url, str) or not self._allowed_url(url):
+            raise UnsafeActionError('Navigation permits only HTTP(S) and about:blank')
+        async with self._lock:
+            # The current document is neither read nor disclosed, so an owned tab
+            # stuck on a protected/error document may still be navigated away.
+            page = self._page(tab_id, allow_protected=True)
+            if page not in self._owned:
+                raise NotOwnedTabError('Only tabs opened by this session (new_tab or their popups) can be navigated; use new_tab for a preexisting user tab')
+            self._invalidate(tab_id)
+            status = 'complete'
+            try:
+                await page.goto(url, wait_until=wait_until, timeout=timeout_ms)
+            except PlaywrightTimeoutError:
+                status = 'timeout'
+            except PlaywrightError as exc:
+                self._invalidate(tab_id)
+                raise NavigationFailedError('Navigation failed; owned tab retained: ' + ((exc.message or '').splitlines() or ['unknown error'])[0][:300]) from None
+            self._invalidate(tab_id)
+            self._ensure_safe(page)
+            result = {'tab': {'id': tab_id, 'url': page.url, 'title': await page.title()}, 'navigation_status': status, 'wait_until': wait_until}
             if status == 'timeout':
                 result['diagnostic'] = {'code': 'navigation_timeout', 'timeout_ms': timeout_ms, 'message': 'Owned tab retained; observe the partially loaded page before choosing another action'}
             return result
@@ -1011,6 +1165,11 @@ class BrowserSession:
             raise UnsafeActionError('wait seconds must be between 0 and 10')
         if operation == 'reload':
             self._navigation_options(action.get('wait_until', 'domcontentloaded'), action.get('timeout_ms', 15000))
+        settle_ms = action.get('settle_ms', 1000 if operation in {'click','press','drag'} else 0)
+        if isinstance(settle_ms,bool) or not isinstance(settle_ms,int) or not 0<=settle_ms<=10000:
+            raise UnsafeActionError('settle_ms must be an integer between 0 and 10000')
+        settle_timeout = action.get('timeout_ms', 15000)
+        self._navigation_options('domcontentloaded', settle_timeout)
         if operation=='drag' and destination is None:
             raise UnsafeActionError('drag requires observed to_target')
         point = await self._point(target, action) if target else None
@@ -1026,62 +1185,72 @@ class BrowserSession:
         # Invalidate before dispatch, including failed/partial operations.
         self._invalidate(tab_id)
         navigation_status = None
-        if operation == 'click':
-            await page.mouse.click(*point)
-        elif operation == 'hover':
-            await page.mouse.move(*point)
-        elif operation == 'fill':
-            focused = await self._eval(target.frame,'''({token,node})=>{const s=globalThis.__browserAutomationSnapshot_v1;const e=s&&s.token===token?s.nodes.get(node):null;if(!e||!e.isConnected||e.disabled||e.closest('[inert]'))return false;if(typeof e.focus==='function')e.focus();let a=document.activeElement;while(a?.shadowRoot?.activeElement)a=a.shadowRoot.activeElement;return !!e&&(a===e||e.contains(a));}''', {'token':target.document,'node':target.node})
-            if not focused:
-                raise UnsafeActionError('Target could not be focused for text entry')
-            await page.keyboard.press('Meta+A' if platform.system() == 'Darwin' else 'Control+A')
-            if text:
-                await page.keyboard.insert_text(text)
-            else:
-                await page.keyboard.press('Backspace')
-        elif operation == 'select':
-            selected = await self._eval(target.frame,'''({token,node,values,signature})=>{const s=globalThis.__browserAutomationSnapshot_v1;const e=s&&s.token===token?s.nodes.get(node):null;if(!e||!e.isConnected||s.fingerprint(e)!==signature)return false;for(const o of e.options)o.selected=values.includes(o.value);e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));return true;}''',{'token':target.document,'node':target.node,'values':value if isinstance(value,list) else [value],'signature':target.signature})
-            if not selected:
-                raise StaleObservationError('Select target changed before form input')
-        elif operation == 'press':
-            if target:
-                focused = await self._eval(target.frame,'''({token,node})=>{
-                  const s=globalThis.__browserAutomationSnapshot_v1,e=s&&s.token===token?s.nodes.get(node):null;
-                  if(!e||!e.isConnected||e.disabled||e.closest('[inert]')) return false;
-                  if(typeof e.focus==='function') e.focus();
-                  let a=document.activeElement;while(a?.shadowRoot?.activeElement)a=a.shadowRoot.activeElement;
-                  return !!e&&(a===e||e.contains(a));
-                }''', {'token':target.document,'node':target.node})
-                if not focused:
-                    raise UnsafeActionError('Target could not be focused for keyboard input')
-            await page.keyboard.press(key)
-        elif operation == 'scroll':
-            if point:
+        # Listeners precede input so a synchronous navigation start is never missed.
+        watch = _NavigationWatch(page)
+        try:
+            if operation == 'click':
+                await page.mouse.click(*point)
+            elif operation == 'hover':
                 await page.mouse.move(*point)
+            elif operation == 'fill':
+                focused = await self._eval(target.frame,'''({token,node})=>{const s=globalThis.__browserAutomationSnapshot_v1;const e=s&&s.token===token?s.nodes.get(node):null;if(!e||!e.isConnected||e.disabled||e.closest('[inert]'))return false;if(typeof e.focus==='function')e.focus();let a=document.activeElement;while(a?.shadowRoot?.activeElement)a=a.shadowRoot.activeElement;return !!e&&(a===e||e.contains(a));}''', {'token':target.document,'node':target.node})
+                if not focused:
+                    raise UnsafeActionError('Target could not be focused for text entry')
+                await page.keyboard.press('Meta+A' if platform.system() == 'Darwin' else 'Control+A')
+                if text:
+                    await page.keyboard.insert_text(text)
+                else:
+                    await page.keyboard.press('Backspace')
+            elif operation == 'select':
+                selected = await self._eval(target.frame,'''({token,node,values,signature})=>{const s=globalThis.__browserAutomationSnapshot_v1;const e=s&&s.token===token?s.nodes.get(node):null;if(!e||!e.isConnected||s.fingerprint(e)!==signature)return false;for(const o of e.options)o.selected=values.includes(o.value);e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));return true;}''',{'token':target.document,'node':target.node,'values':value if isinstance(value,list) else [value],'signature':target.signature})
+                if not selected:
+                    raise StaleObservationError('Select target changed before form input')
+            elif operation == 'press':
+                if target:
+                    focused = await self._eval(target.frame,'''({token,node})=>{
+                      const s=globalThis.__browserAutomationSnapshot_v1,e=s&&s.token===token?s.nodes.get(node):null;
+                      if(!e||!e.isConnected||e.disabled||e.closest('[inert]')) return false;
+                      if(typeof e.focus==='function') e.focus();
+                      let a=document.activeElement;while(a?.shadowRoot?.activeElement)a=a.shadowRoot.activeElement;
+                      return !!e&&(a===e||e.contains(a));
+                    }''', {'token':target.document,'node':target.node})
+                    if not focused:
+                        raise UnsafeActionError('Target could not be focused for keyboard input')
+                await page.keyboard.press(key)
+            elif operation == 'scroll':
+                if point:
+                    await page.mouse.move(*point)
+                else:
+                    main_frame = (await self._frames(page))[0]
+                    view = await self._eval(main_frame,'({x:innerWidth/2,y:innerHeight/2})')
+                    await page.mouse.move(view['x'],view['y'])
+                await page.mouse.wheel(dx, dy)
+            elif operation == 'drag':
+                await page.mouse.move(*point)
+                await page.mouse.down()
+                try:
+                    await page.mouse.move(*end, steps=12)
+                finally:
+                    await page.mouse.up()
+            elif operation == 'wait':
+                await asyncio.sleep(seconds)
+            elif operation == 'back':
+                await page.go_back()
+            elif operation == 'forward':
+                await page.go_forward()
+            elif operation == 'reload':
+                navigation_status = 'complete'
+                try:
+                    await page.reload(wait_until=action.get('wait_until', 'domcontentloaded'), timeout=action.get('timeout_ms', 15000))
+                except PlaywrightTimeoutError:
+                    navigation_status = 'timeout'
+            if navigation_status == 'timeout':
+                # reload already spent its bounded wait; never wait a second time.
+                navigation = {'started': True, 'status': 'timeout', 'url': page.url}
             else:
-                main_frame = (await self._frames(page))[0]
-                view = await self._eval(main_frame,'({x:innerWidth/2,y:innerHeight/2})')
-                await page.mouse.move(view['x'],view['y'])
-            await page.mouse.wheel(dx, dy)
-        elif operation == 'drag':
-            await page.mouse.move(*point)
-            await page.mouse.down()
-            try:
-                await page.mouse.move(*end, steps=12)
-            finally:
-                await page.mouse.up()
-        elif operation == 'wait':
-            await asyncio.sleep(seconds)
-        elif operation == 'back':
-            await page.go_back()
-        elif operation == 'forward':
-            await page.go_forward()
-        elif operation == 'reload':
-            navigation_status = 'complete'
-            try:
-                await page.reload(wait_until=action.get('wait_until', 'domcontentloaded'), timeout=action.get('timeout_ms', 15000))
-            except PlaywrightTimeoutError:
-                navigation_status = 'timeout'
+                navigation = await watch.settle(settle_ms, settle_timeout)
+        finally:
+            watch.dispose()
         self._ensure_safe(page)
         await asyncio.sleep(0)  # yield for popup notification; never a fabricated wait-for-success
         self._sync_pages()
@@ -1091,7 +1260,7 @@ class BrowserSession:
                 if page in self._owned:
                     self._owned.add(popup)
                 popup_ids.append(self._ids[popup])
-        result = {'operation': operation, 'tab_id': tab_id, 'url': page.url, 'popup_tabs': popup_ids, 'latency_ms': (time.perf_counter()-started)*1000}
+        result = {'operation': operation, 'tab_id': tab_id, 'url': page.url, 'popup_tabs': popup_ids, 'navigation': navigation, 'latency_ms': (time.perf_counter()-started)*1000}
         if navigation_status is not None:
             result.update(navigation_status=navigation_status, wait_until=action.get('wait_until', 'domcontentloaded'))
             if navigation_status == 'timeout':

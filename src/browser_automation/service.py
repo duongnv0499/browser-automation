@@ -68,6 +68,13 @@ class BrowserService:
                 return True
         return False
 
+    def _forget_tab(self, sid: str, tab_id: str) -> None:
+        """Drop cached observations and paused approvals bound to a tab's previous document."""
+        for key in [key for key, snapshot in self.snapshots.items() if key[0] == sid and snapshot.get("tab_id") == tab_id]:
+            del self.snapshots[key]
+        for key in [key for key in self.pending_actions if key[0] == sid and key[1] == tab_id]:
+            del self.pending_actions[key]
+
     async def dispatch(self, command: str, arguments: dict | None = None, *, on_progress=None) -> dict:
         args = dict(arguments or {})
         from .mcp import validate_arguments
@@ -116,6 +123,16 @@ class BrowserService:
             if command == "new_tab":
                 url = web_url(args.get("url", "about:blank"))
                 return {"tab": await browser.new_tab(url, wait_until=args.get("wait_until", "domcontentloaded"), timeout_ms=args.get("timeout_ms", 15000))}
+            if command == "navigate":
+                url = web_url(args["url"])
+                try:
+                    result = await browser.navigate(args["tab_id"], url, wait_until=args.get("wait_until", "domcontentloaded"), timeout_ms=args.get("timeout_ms", 15000))
+                except Exception as exc:
+                    if getattr(exc, "code", None) not in {"not_owned_tab", "invalid_argument"}:
+                        self._forget_tab(sid, args["tab_id"])
+                    raise
+                self._forget_tab(sid, args["tab_id"])
+                return result
             if command == "observe":
                 limit = args.get("max_text", 12000)
                 if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100000:

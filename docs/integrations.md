@@ -40,7 +40,8 @@ Start `uv run browser-agent serve`, keep its stdin/stdout open, and send one JSO
 {"id":3,"command":"observe","arguments":{"session_id":"RETURNED_SESSION","tab_id":"RETURNED_TAB","screenshot":true}}
 {"id":4,"command":"act","arguments":{"session_id":"RETURNED_SESSION","tab_id":"RETURNED_TAB","action":{"observation_id":"RETURNED_REVISION","operation":"click","target":"RETURNED_ELEMENT"}}}
 {"id":5,"command":"text","arguments":{"session_id":"RETURNED_SESSION","observation_id":"RETURNED_REVISION","offset":12000,"limit":12000}}
-{"id":6,"command":"close","arguments":{"session_id":"RETURNED_SESSION"}}
+{"id":6,"command":"navigate","arguments":{"session_id":"RETURNED_SESSION","tab_id":"RETURNED_TAB","url":"https://example.org/next"}}
+{"id":7,"command":"close","arguments":{"session_id":"RETURNED_SESSION"}}
 ```
 
 Use fresh observations after actions. Stale/covered/wrong-tab/unsupported actions fail rather than targeting a guessed selector. Direct external `act` uses the same observed-element risk policy as autonomous runs: consequential/custom/visual controls and potentially submitting keys pause for exact host approval rather than bypassing policy. Service keeps at most eight bounded observation metadata records globally, without screenshots; each browser session also retains eight revisions, so browser operations performed during `run` can evict earlier external snapshots. Full text continuation delegates to that browser revision cache. `text_length` reports the captured prefix length; `source_truncated` means source beyond the hard safety cap was omitted, and `next_offset: null` means the cache is exhausted, not that every DOM byte was captured. Evicted revisions require a fresh observation.
@@ -48,6 +49,10 @@ Use fresh observations after actions. Stale/covered/wrong-tab/unsupported action
 ### Bounded navigation and semantic observation
 
 `new_tab` accepts `wait_until` (`commit`, `domcontentloaded`, `load`) and `timeout_ms` (1–120000, default 15000). A bounded timeout returns the owned tab ID and `navigation_status: "timeout"`, not a closed uninspectable tab. Retain it, observe the rendered page, and explicitly close owned work when appropriate; never infer a site's blocking cause from a timeout alone. `networkidle` is not accepted.
+
+`navigate` (`session_id`, `tab_id`, `url`, optional `wait_until`/`timeout_ms` with the same bounds) moves a tab this session owns (`new_tab` or its popups) and returns `{tab: {id, url, title}, navigation_status, wait_until}`; timeout retains the tab with a `navigation_timeout` diagnostic. Only HTTP(S) and `about:blank` are accepted (`prohibited_url` otherwise, before any browser call). A preexisting user tab is refused with `not_owned_tab` and `recommended_next_action: "new_tab"`; the user's page is left untouched. Navigating drops that tab's cached observations and paused approvals, so acting on an older revision returns `unknown_observation`; observe again first.
+
+`act` accepts optional `settle_ms` (0–10000; default 1000 for `click`/`press`/`drag`, otherwise 0) and `timeout_ms`. Every act result includes `navigation: {started, status, url}`: `status` is `none` (no main-frame navigation started within the settle window, or `reason: "not_committed"`/`"page_closed"`), `complete` (fragment/`pushState` commit, or new document reached `domcontentloaded`) or `timeout`. A non-navigating click returns after at most the settle window, never the navigation timeout. This is a settle signal, not success: verify the rendered outcome with a fresh observation. See [settling after input](browser.md#settling-after-input).
 
 `observe` adds `coverage` and DOM-derived `page_state`; `truncated: false` does not mean every rendered semantic control was collected. `interpret_visual: true` explicitly requests a screenshot plus paid multimodal interpretation (`provider`/`model` optional); it is not the same as merely capturing `screenshot: true`. DOM/vision provenance remains separate and provider failure is explicit. [Recovery policy](providers.md#operator-controlled-recovery) is host-only: snapshot-bound `reload` defaults to exact approval; a button's Refresh label grants no authority.
 
@@ -169,7 +174,7 @@ Autonomous risky actions pause by default with `host_approval.binding`. Save tha
 
 ## OMP extension
 
-Installed OMP v18.8.0 exposes public extension loading (`-e`) and `pi.registerTool`/`pi.zod`. The actual extension is `integrations/omp/browser-tools.mjs`; it registers `browser_agent` and keeps one Python JSON-lines worker per extension factory.
+Installed OMP v18.8.0 exposes public extension loading (`-e`) and `pi.registerTool`/`pi.zod`. The actual extension is `integrations/omp/browser-tools.mjs`; it registers `browser_agent` and keeps one Python JSON-lines worker per extension factory. Its `command` enum mirrors the JSON-lines catalog, including `navigate` for session-owned tabs.
 
 ```sh
 BROWSER_AGENT_PYTHON=/ABS/PATH/browser-automation/.venv/bin/python \
