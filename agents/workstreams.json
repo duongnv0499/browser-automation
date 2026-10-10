@@ -377,7 +377,8 @@
         "owner": "Autonomy",
         "commit": "feat(browser): navigate owned tabs and settle after input",
         "scope": "BrowserSession.navigate on session-owned tabs only (not_owned_tab error for user tabs), new_tab URL rules, snapshot invalidation, timeout keeps tab; navigate tool across service/MCP stdio+HTTP/CLI/OMP; act settle_ms (0..10000, default 1000 click/press/drag) with navigation {started,status,url} settle signal, never a success claim",
-        "status": "pending"
+        "status": "committed 687cf22, pushed origin/main 2026-10-10",
+        "verification": "Autonomy 2026-10-10 macOS: BROWSER_INTEGRATION_TESTS=1 uv run --extra http pytest tests/test_browser.py tests/test_browser_observation.py tests/test_service.py tests/test_service_stdio.py tests/test_agent_surface.py tests/test_network_surface.py -> 82 passed, 0 failed in 63.74s; MCP stdio smoke new_tab->navigate->click link->navigation complete, fresh observe 'Second page rendered' passed; parent viewed screenshot"
       },
       {
         "id": "F2",
@@ -451,7 +452,14 @@
       "command": "BROWSER_INTEGRATION_TESTS=1 uv run --extra http pytest -q -x",
       "result": "1 failed, 186 passed in 124.84s",
       "failure": "tests/test_service_omp.py::test_actual_omp_extension_load: locally installed omp CLI rejects --no-ui ('unknown flag: --no-ui'); environment/version mismatch, not a regression",
-      "full_non_x_run": "in progress (parent will report result)"
+      "full_non_x_run": {
+        "command": "BROWSER_INTEGRATION_TESTS=1 uv run --extra http pytest -q",
+        "result": "2 failed, 194 passed in 113.90s",
+        "failures": [
+          "tests/test_service_omp.py::test_actual_omp_extension_load: local omp 18.2.1 lacks --no-ui; environment, not a regression",
+          "tests/test_service_stdio.py::test_cli_persistent_real_browser: asyncio default 64 KiB StreamReader line limit exceeded by macOS screenshot JSON; test harness bug, fixed in F1"
+        ]
+      }
     },
     "acceptance": [
       "navigate works on session-owned tabs only; user tabs rejected with not_owned_tab; URL rules match new_tab; timeout retains tab",
@@ -465,8 +473,17 @@
       "unified suite + real-browser evidence executed and recorded honestly; doc.md untouched",
       "five feature commits pushed to origin/main in order"
     ],
-    "commits": [],
-    "status": "Bootstrap: plan persisted; F1 implementation pending"
+    "commits": [
+      {
+        "hash": "28fd973",
+        "message": "chore(agents): plan autonomy round for agent-friendly browser control"
+      },
+      {
+        "hash": "687cf22",
+        "message": "feat(browser): navigate owned tabs and settle after input"
+      }
+    ],
+    "status": "F1 committed 687cf22; F2 (stale approvals/covered targets) pending"
   },
   "network_devtools_phase_2026_10_09": {
     "feature": "network DevTools capabilities 2026-10-09",
@@ -476,7 +493,7 @@
   },
   "current_phase": {
     "feature": "autonomy round 2026-10-10",
-    "phase": "Bootstrap: plan persisted; F1 (navigate/settle) pending with Autonomy worker",
+    "phase": "F1 committed 687cf22 and pushed; F2 (stale approvals early, covered flags) pending with Autonomy worker",
     "active_section": "autonomy_round_2026_10_10",
     "active_tracker": "agents/autonomy.json",
     "historical_sections": "network_devtools_phase_2026_10_09 and earlier sections remain historical evidence, not acceptance of this round"
