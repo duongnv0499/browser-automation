@@ -385,7 +385,8 @@
         "owner": "Autonomy",
         "commit": "fix(observe): reject stale approvals early and flag covered targets",
         "scope": "service drops tab snapshots/pending actions after act/approved_act/navigate/run/upload/download/close_tab; BrowserSession.check_observation before approval_required; snapshot.js covered:true without operations the guard would reject; act guard stays authoritative",
-        "status": "pending"
+        "status": "committed 481041a, pushed origin/main 2026-10-10",
+        "verification": "Autonomy 2026-10-10 macOS: 11-file scoped suite (test_browser, test_browser_visual, test_browser_observation, test_browser_context, test_page_state, test_agent, test_agent_surface, test_service, test_service_stdio, test_mcp_http_browser, test_network_surface) -> 162 passed, 0 failed in 86.62s; real-page check HN 147 elements/0 covered, Wikipedia 66/1 covered (0.53px viewport-edge sliver, guard agrees) after wrapped-inline-link input-point fix; parent viewed covered-proof.png"
       },
       {
         "id": "F3",
@@ -481,9 +482,13 @@
       {
         "hash": "687cf22",
         "message": "feat(browser): navigate owned tabs and settle after input"
+      },
+      {
+        "hash": "481041a",
+        "message": "fix(observe): reject stale approvals early and flag covered targets"
       }
     ],
-    "status": "F1 committed 687cf22; F2 (stale approvals/covered targets) pending"
+    "status": "F2 committed 481041a; F3 (compact observations) pending"
   },
   "network_devtools_phase_2026_10_09": {
     "feature": "network DevTools capabilities 2026-10-09",
@@ -493,7 +498,7 @@
   },
   "current_phase": {
     "feature": "autonomy round 2026-10-10",
-    "phase": "F1 committed 687cf22 and pushed; F2 (stale approvals early, covered flags) pending with Autonomy worker",
+    "phase": "F2 committed 481041a and pushed; F3 (compact observation output) pending with Autonomy worker",
     "active_section": "autonomy_round_2026_10_10",
     "active_tracker": "agents/autonomy.json",
     "historical_sections": "network_devtools_phase_2026_10_09 and earlier sections remain historical evidence, not acceptance of this round"
