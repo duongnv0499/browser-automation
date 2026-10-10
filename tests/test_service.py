@@ -307,6 +307,13 @@ async def test_observe_detail_and_visual_region_shapes():
     session.observe = observe
     compact = await service.dispatch("observe", {"session_id": "s", "tab_id": "t"})
     assert compact["coverage"] == {"status": "complete"} and compact["limitations"] == 1 and compact["visual_regions_omitted"] == 1
+    assert "settle_retries" not in compact
+    original = session.observe
+    async def settled(tab_id, screenshot=False, max_text=12000):
+        return {**(await original(tab_id, screenshot, max_text)), "settle_retries": 2}
+    session.observe = settled
+    assert (await service.dispatch("observe", {"session_id": "s", "tab_id": "t"}))["settle_retries"] == 2
+    session.observe = original
     assert compact["elements"] == [{"id": "f1:1", "role": "button", "name": "B" * 120, "ops": ["click"]},
                                    {"id": "f1:2", "role": "textbox", "name": "Email", "ops": ["fill"], "value": "a@example.com", "covered": True}]
     assert service.snapshots[("s", "revision")]["elements"] == elements

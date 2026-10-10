@@ -856,120 +856,144 @@ class BrowserSession:
             raise BrowserError('max_text must be between 0 and 1000000')
         if text_scope not in ('viewport', 'document'):
             raise BrowserError('text_scope must be viewport or document')
+        # Observation never dispatches input, so a revision that goes stale while the page is
+        # still settling (late layout, autocomplete, hydration) is safely re-collected from
+        # scratch: at most 3 attempts within ~1.5 s, then the last error is raised.
         async with self._lock:
-            page = self._page(tab_id)
-            revision = uuid.uuid4().hex
-            targets: dict[str, _Target] = {}
-            elements, sections, documents, limitations = [], [], [], []
-            frames = await self._frames(page)
-            all_frame_ids = {f.frame_id for f in frames}
-            protected, screenshot_withheld = await self._protected_frames(frames)
-            limitations.extend(protected)
-            safety = {'editable_nonempty': False, 'sensitive_fields': False, 'unsaved': False}
-            ready_state = 'unknown'
-            collected_text_nodes = 0
-            visible_alerts = []
-            source_truncated = False
-            if len(frames) > 64:
-                limitations.append({'frame': 64, 'reason': f'Omitted {len(frames) - 64} frames beyond 64-frame limit'})
-                frames = frames[:64]
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + 1.5
+            attempts = 0
+            while True:
+                attempts += 1
+                try:
+                    observation = await self._observe_once(tab_id, screenshot, max_text, text_scope)
+                except StaleObservationError as exc:
+                    backoff = 0.15 * attempts
+                    if attempts >= 3 or loop.time() + backoff >= deadline:
+                        cause = exc.diagnostic if isinstance(getattr(exc, 'diagnostic', None), dict) else None
+                        exc.diagnostic = {'code': 'page_settling', 'observe_attempts': attempts, 'message': 'Page kept changing during read-only observation; wait or observe again', **({'cause': cause} if cause else {})}
+                        raise
+                    await asyncio.sleep(backoff)
+                    continue
+                if attempts > 1:
+                    observation['settle_retries'] = attempts - 1
+                return observation
+
+    async def _observe_once(self, tab_id: str, screenshot: bool, max_text: int, text_scope: str) -> dict[str, Any]:
+        """One coherent read-only observation; caller holds the lock."""
+        page = self._page(tab_id)
+        revision = uuid.uuid4().hex
+        targets: dict[str, _Target] = {}
+        elements, sections, documents, limitations = [], [], [], []
+        frames = await self._frames(page)
+        all_frame_ids = {f.frame_id for f in frames}
+        protected, screenshot_withheld = await self._protected_frames(frames)
+        limitations.extend(protected)
+        safety = {'editable_nonempty': False, 'sensitive_fields': False, 'unsaved': False}
+        ready_state = 'unknown'
+        collected_text_nodes = 0
+        visible_alerts = []
+        source_truncated = False
+        if len(frames) > 64:
+            limitations.append({'frame': 64, 'reason': f'Omitted {len(frames) - 64} frames beyond 64-frame limit'})
+            frames = frames[:64]
+            source_truncated = True
+        total_elements_budget = 2000
+        total_text_budget = 1000000
+        viewport_chars = 0
+        omitted_elements = 0
+        for index, frame in enumerate(frames):
+            if not self._frame_allowed(frame):
+                continue
+            try:
+                ox, oy, clip = await self._frame_geometry(frame)
+                # Viewport text feeds the semantic digest; document text has its own budget.
+                remaining_text = max(0, total_text_budget - viewport_chars)
+                remaining_document = max(0, total_text_budget - sum(len(s) for s in sections))
+                remaining_elements = max(0, total_elements_budget - len(elements))
+                data = await self._eval(frame,self._script, {'clip':{'left':clip['left']-ox,'right':clip['right']-ox,'top':clip['top']-oy,'bottom':clip['bottom']-oy},'max_text_chars':remaining_text,'max_elements':remaining_elements,'max_nodes':20000,'text_scope':text_scope,'max_document_chars':remaining_document})
+            except PlaywrightError:
+                limitations.append({'frame': index, 'reason': 'detached or unavailable frame'})
+                continue
+            except ProtectedUrlError:
+                raise StaleObservationError('Frame navigated to a protected document during observation') from None
+            except UnsafeActionError as exc:
+                limitations.append({'frame': index, 'reason': str(exc)})
+                continue
+            if data.get('source_truncated'):
                 source_truncated = True
-            total_elements_budget = 2000
-            total_text_budget = 1000000
-            viewport_chars = 0
-            omitted_elements = 0
-            for index, frame in enumerate(frames):
-                if not self._frame_allowed(frame):
+            for key in ('editable_nonempty', 'sensitive_fields', 'unsaved'):
+                safety[key] |= data.get(key, False)
+            collected_text_nodes += data.get('rendered_text_nodes', 0)
+            if frame.parent_frame is None:
+                ready_state = data.get('ready_state', 'unknown')
+            for alert in data.get('visible_alerts', []):
+                if len(visible_alerts) >= 8:
+                    break
+                bounds = dict(alert['bounds'])
+                bounds['x'] += ox
+                bounds['y'] += oy
+                visible_alerts.append({**alert, 'bounds': bounds, 'frame_id': frame.frame_id})
+            omitted_elements += data.get('omitted_elements', 0)
+            documents.append((frame, data['document'], self._semantic_digest(data)))
+            header = f"[frame {index}: {data['url']}]\n"
+            viewport_chars += len(header) + len(data['text'])  # identical to the viewport-only budget
+            sections.append(header + (data['document_text'] if text_scope == 'document' else data['text']))
+            for element in data['elements']:
+                local = element['id']
+                public = f"f{data['document']}:{local}"
+                bounds = dict(element['bounds'])
+                bounds['x'] += ox
+                bounds['y'] += oy
+                if bounds['x']+bounds['width']<=clip['left'] or bounds['x']>=clip['right'] or bounds['y']+bounds['height']<=clip['top'] or bounds['y']>=clip['bottom']:
                     continue
-                try:
-                    ox, oy, clip = await self._frame_geometry(frame)
-                    # Viewport text feeds the semantic digest; document text has its own budget.
-                    remaining_text = max(0, total_text_budget - viewport_chars)
-                    remaining_document = max(0, total_text_budget - sum(len(s) for s in sections))
-                    remaining_elements = max(0, total_elements_budget - len(elements))
-                    data = await self._eval(frame,self._script, {'clip':{'left':clip['left']-ox,'right':clip['right']-ox,'top':clip['top']-oy,'bottom':clip['bottom']-oy},'max_text_chars':remaining_text,'max_elements':remaining_elements,'max_nodes':20000,'text_scope':text_scope,'max_document_chars':remaining_document})
-                except PlaywrightError:
-                    limitations.append({'frame': index, 'reason': 'detached or unavailable frame'})
-                    continue
-                except ProtectedUrlError:
-                    raise StaleObservationError('Frame navigated to a protected document during observation') from None
-                except UnsafeActionError as exc:
-                    limitations.append({'frame': index, 'reason': str(exc)})
-                    continue
-                if data.get('source_truncated'):
-                    source_truncated = True
-                for key in ('editable_nonempty', 'sensitive_fields', 'unsaved'):
-                    safety[key] |= data.get(key, False)
-                collected_text_nodes += data.get('rendered_text_nodes', 0)
-                if frame.parent_frame is None:
-                    ready_state = data.get('ready_state', 'unknown')
-                for alert in data.get('visible_alerts', []):
-                    if len(visible_alerts) >= 8:
-                        break
-                    bounds = dict(alert['bounds'])
-                    bounds['x'] += ox
-                    bounds['y'] += oy
-                    visible_alerts.append({**alert, 'bounds': bounds, 'frame_id': frame.frame_id})
-                omitted_elements += data.get('omitted_elements', 0)
-                documents.append((frame, data['document'], self._semantic_digest(data)))
-                header = f"[frame {index}: {data['url']}]\n"
-                viewport_chars += len(header) + len(data['text'])  # identical to the viewport-only budget
-                sections.append(header + (data['document_text'] if text_scope == 'document' else data['text']))
-                for element in data['elements']:
-                    local = element['id']
-                    public = f"f{data['document']}:{local}"
-                    bounds = dict(element['bounds'])
-                    bounds['x'] += ox
-                    bounds['y'] += oy
-                    if bounds['x']+bounds['width']<=clip['left'] or bounds['x']>=clip['right'] or bounds['y']+bounds['height']<=clip['top'] or bounds['y']>=clip['bottom']:
-                        continue
-                    target = _Target(frame, data['document'], local, element['operations'], bounds, screenshot and not screenshot_withheld and element['role'] == 'canvas', element.pop('signature'), tuple(o['value'] for o in element.get('options',[]) if not o['disabled']), element.get('multiple',False), tuple(url for url in (element.get('href'),element.get('form_action')) if url))
-                    targets[public] = target
-                    elements.append({**element, 'id': public, 'bounds': bounds, 'frame': {'index': index, 'url': data['url'], 'offset': {'x': ox, 'y': oy}, 'document': data['document']}})
-            text = '\n\n'.join(sections)
-            observation: dict[str, Any] = {'id': revision, 'tab_id': tab_id, 'url': page.url, 'title': await page.title(), 'text': text[:max_text], 'elements': elements, 'truncated': len(text) > max_text or source_truncated, 'source_truncated': source_truncated, 'text_length': len(text), 'next_offset': max_text if len(text) > max_text else None, 'omitted_elements': omitted_elements, 'timestamp': time.time(), 'limitations': limitations}
-            observation['visible_alerts'] = visible_alerts
-            coverage_reasons = [item.get('code', 'frame_unavailable') for item in limitations if item.get('visibility') != 'hidden']
-            if source_truncated:
-                coverage_reasons.append('collector_budget_exceeded')
-            if not collected_text_nodes and not any(e['role'] != 'canvas' for e in elements):
-                coverage_reasons.append('empty_rendered_dom')
-            observation.update(ready_state=ready_state, safety=safety,
-                               coverage={'status': 'partial' if coverage_reasons else 'complete',
-                                         'reasons': list(dict.fromkeys(coverage_reasons)),
-                                         'dom_elements': len(elements), 'rendered_text_nodes': collected_text_nodes})
-            observation['page_state'] = describe_dom(observation)
-            png = None
-            if screenshot and screenshot_withheld:
-                observation['screenshot_status'] = 'withheld'
-                observation['diagnostic'] = {'code': 'protected_frame_screenshot_withheld', 'message': 'Main DOM remains available; protected subframe pixels cannot be disclosed'}
-            if screenshot and not screenshot_withheld:
-                png = await self._capture(page)
-                observation['screenshot'] = base64.b64encode(png).decode('ascii')
-                observation['screenshot_status'] = 'captured'
-                viewport = await self._eval(frames[0],'({width:innerWidth,height:innerHeight})')
-                observation['viewport'] = viewport
-                main_doc = next((token for frame, token, digest in documents if frame.parent_frame is None), None)
-                if main_doc is not None:
-                    for row in range(8):
-                        for col in range(8):
-                            key = f'visual:{row}:{col}'
-                            bounds = {'x': col * viewport['width']/8, 'y': row * viewport['height']/8, 'width': viewport['width']/8, 'height': viewport['height']/8}
-                            targets[key] = _Target(frames[0], main_doc, None, ['click','hover','drag','scroll'], bounds, True)
-                            elements.append({'id': key, 'role': 'visual-region', 'name': f'Screenshot region row {row} column {col}', 'value': '', 'operations': ['click','hover','drag','scroll'], 'bounds': bounds, 'frame': {'index': 0, 'document': main_doc}})
-            self._snapshots[revision] = {'tab': tab_id, 'targets': targets, 'documents': documents, 'frame_ids': all_frame_ids, 'text': text, 'url': page.url, 'visual': png is not None, 'pixels': png, 'source_truncated': source_truncated, 'page': page}
-            self._snapshots[revision]['viewport'] = observation.get('viewport')
-            while len(self._snapshots) > self._snapshot_limit:
-                self._snapshots.pop(next(iter(self._snapshots)))
-            if screenshot:
-                try:
-                    await self._validate(self._snapshots[revision])
-                except BaseException:
-                    self._snapshots.pop(revision,None)
-                    raise
-            else:
-                self._ensure_safe(page)
-            return observation
+                target = _Target(frame, data['document'], local, element['operations'], bounds, screenshot and not screenshot_withheld and element['role'] == 'canvas', element.pop('signature'), tuple(o['value'] for o in element.get('options',[]) if not o['disabled']), element.get('multiple',False), tuple(url for url in (element.get('href'),element.get('form_action')) if url))
+                targets[public] = target
+                elements.append({**element, 'id': public, 'bounds': bounds, 'frame': {'index': index, 'url': data['url'], 'offset': {'x': ox, 'y': oy}, 'document': data['document']}})
+        text = '\n\n'.join(sections)
+        observation: dict[str, Any] = {'id': revision, 'tab_id': tab_id, 'url': page.url, 'title': await page.title(), 'text': text[:max_text], 'elements': elements, 'truncated': len(text) > max_text or source_truncated, 'source_truncated': source_truncated, 'text_length': len(text), 'next_offset': max_text if len(text) > max_text else None, 'omitted_elements': omitted_elements, 'timestamp': time.time(), 'limitations': limitations}
+        observation['visible_alerts'] = visible_alerts
+        coverage_reasons = [item.get('code', 'frame_unavailable') for item in limitations if item.get('visibility') != 'hidden']
+        if source_truncated:
+            coverage_reasons.append('collector_budget_exceeded')
+        if not collected_text_nodes and not any(e['role'] != 'canvas' for e in elements):
+            coverage_reasons.append('empty_rendered_dom')
+        observation.update(ready_state=ready_state, safety=safety,
+                           coverage={'status': 'partial' if coverage_reasons else 'complete',
+                                     'reasons': list(dict.fromkeys(coverage_reasons)),
+                                     'dom_elements': len(elements), 'rendered_text_nodes': collected_text_nodes})
+        observation['page_state'] = describe_dom(observation)
+        png = None
+        if screenshot and screenshot_withheld:
+            observation['screenshot_status'] = 'withheld'
+            observation['diagnostic'] = {'code': 'protected_frame_screenshot_withheld', 'message': 'Main DOM remains available; protected subframe pixels cannot be disclosed'}
+        if screenshot and not screenshot_withheld:
+            png = await self._capture(page)
+            observation['screenshot'] = base64.b64encode(png).decode('ascii')
+            observation['screenshot_status'] = 'captured'
+            viewport = await self._eval(frames[0],'({width:innerWidth,height:innerHeight})')
+            observation['viewport'] = viewport
+            main_doc = next((token for frame, token, digest in documents if frame.parent_frame is None), None)
+            if main_doc is not None:
+                for row in range(8):
+                    for col in range(8):
+                        key = f'visual:{row}:{col}'
+                        bounds = {'x': col * viewport['width']/8, 'y': row * viewport['height']/8, 'width': viewport['width']/8, 'height': viewport['height']/8}
+                        targets[key] = _Target(frames[0], main_doc, None, ['click','hover','drag','scroll'], bounds, True)
+                        elements.append({'id': key, 'role': 'visual-region', 'name': f'Screenshot region row {row} column {col}', 'value': '', 'operations': ['click','hover','drag','scroll'], 'bounds': bounds, 'frame': {'index': 0, 'document': main_doc}})
+        self._snapshots[revision] = {'tab': tab_id, 'targets': targets, 'documents': documents, 'frame_ids': all_frame_ids, 'text': text, 'url': page.url, 'visual': png is not None, 'pixels': png, 'source_truncated': source_truncated, 'page': page}
+        self._snapshots[revision]['viewport'] = observation.get('viewport')
+        while len(self._snapshots) > self._snapshot_limit:
+            self._snapshots.pop(next(iter(self._snapshots)))
+        if screenshot:
+            try:
+                await self._validate(self._snapshots[revision])
+            except BaseException:
+                self._snapshots.pop(revision,None)
+                raise
+        else:
+            self._ensure_safe(page)
+        return observation
 
     async def text_continuation(self, tab_id: str, observation_id: str, offset: int = 0, max_text: int = 12000) -> dict[str, Any]:
         if not isinstance(offset, int) or offset < 0 or not isinstance(max_text, int) or not 1 <= max_text <= 1_000_000:

@@ -36,6 +36,13 @@ OVERLAY_FIXTURE = b'''<!doctype html><html><head><title>Overlay fixture</title><
 </body></html>'''
 
 
+# Rendered text changes every animation frame: until ~250 ms after script start, or forever.
+SETTLING_FIXTURE = b'''<!doctype html><html><head><title>Settling fixture</title></head><body style="font:18px sans-serif">
+<h1>Settling page</h1><p id="late">Loading</p><button>Stable control</button>
+<script>const forever=location.search.includes('forever');const start=performance.now();let n=0;
+function tick(){const done=!forever&&performance.now()-start>250;document.querySelector('#late').textContent=done?'Settled':'Frame '+(++n);if(!done)requestAnimationFrame(tick);}
+requestAnimationFrame(tick);</script>
+</body></html>'''
 POLICY_FIXTURE = b'''<!doctype html><html><head><title>Policy fixture</title><style>body{font:18px sans-serif;margin:10px}button,input{margin:5px;padding:6px}</style></head><body>
 <h1 id="count">Count 0</h1>
 <button onclick="n++;document.querySelector('#count').textContent='Count '+n">Add</button>
@@ -86,6 +93,8 @@ async def site():
             headers = ''
             if route == '/api':
                 body = json.dumps({'method': request.split(b' ')[0].decode(), 'received': payload.decode()}).encode()
+            elif route == '/settling':
+                body = SETTLING_FIXTURE
             elif route == '/policy':
                 body = POLICY_FIXTURE
             elif route == '/frame':
@@ -599,6 +608,37 @@ async def test_service_approval_modes_on_real_browser(site, tmp_path, monkeypatc
         assert observation['id'] not in {key[1] for key in service.snapshots}
     finally:
         await service.close()
+
+
+@pytest.mark.asyncio
+async def test_observe_retries_read_only_revalidation_while_page_settles(browser, site, tmp_path):
+    session, tab = browser
+    await session.navigate(tab, site + 'settling')
+    started = time.perf_counter()
+    observation = await session.observe(tab, screenshot=True)
+    assert time.perf_counter() - started < 3
+    # The first screenshot revalidation sees the per-frame text change; a fresh revision is returned.
+    assert observation.get('settle_retries', 0) >= 1 and 'Settled' in observation['text']
+    destination = Path(os.environ.get('BROWSER_PROOF_DIR', tmp_path))
+    destination.mkdir(parents=True, exist_ok=True)
+    (destination / 'settled-proof.png').write_bytes(base64.b64decode(observation['screenshot']))
+    stable = element(observation, 'Stable control')
+    await session.act(tab, {'operation': 'hover', 'observation_id': observation['id'], 'target': stable['id']})
+    # Never-settling page: bounded attempts, then the stale error with a page_settling diagnostic.
+    await session.navigate(tab, site + 'settling?forever=1')
+    started = time.perf_counter()
+    with pytest.raises(StaleObservationError) as error:
+        await session.observe(tab, screenshot=True)
+    assert time.perf_counter() - started < 4
+    assert error.value.diagnostic['code'] == 'page_settling' and 2 <= error.value.diagnostic['observe_attempts'] <= 3
+    # act stays fail-fast: no retry after (or instead of) input.
+    await session.navigate(tab, site + 'settling')
+    observation = await session.observe(tab)
+    await session._page(tab).evaluate("document.querySelector('h1').textContent='Changed after observe'")
+    started = time.perf_counter()
+    with pytest.raises(StaleObservationError):
+        await session.act(tab, {'operation': 'click', 'observation_id': observation['id'], 'target': element(observation, 'Stable control')['id']})
+    assert time.perf_counter() - started < 1
 
 
 @pytest_asyncio.fixture

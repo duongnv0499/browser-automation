@@ -445,6 +445,8 @@ def compact_observation(observation: dict, *, visual_regions: bool = False) -> d
     for key in ("screenshot_status", "screenshot", "diagnostic", "visual_summary", "visual_interpretation_error"):
         if key in observation:
             compact[key] = observation[key]
+    if observation.get("settle_retries"):
+        compact["settle_retries"] = observation["settle_retries"]
     compact["omitted_elements"] = observation.get("omitted_elements", 0)
     compact["limitations"] = len(observation.get("limitations") or [])
     elements, hidden_regions = [], 0

@@ -38,9 +38,10 @@
   "F1": "COMMITTED 687cf22 (pushed)",
   "F2": "COMMITTED 481041a (pushed)",
   "F3": "COMMITTED 5aae8c3 (pushed)",
-  "F4": "VERIFIED_awaiting_GitOwner_commit"
+  "F4": "COMMITTED cb059ae (pushed)",
+  "F4b": "VERIFIED_awaiting_GitOwner_commit"
  },
- "current_feature": "F4 host approval modes (commit: feat(policy): host approval modes for autonomous agents)",
+ "current_feature": "F4b observe settle retry (commit: fix(observe): retry read-only revalidation while the page settles)",
  "decisions": {
   "navigate_ownership": "BrowserSession.navigate accepts only pages in _owned (new_tab or popups of owned tabs) in both attached and isolated sessions; otherwise NotOwnedTabError(UnsafeActionError) code not_owned_tab, recommended_next_action new_tab",
   "navigate_url_rules": "Destination must pass BrowserSession._allowed_url (HTTP(S) with host or about:blank); service additionally applies web_url -> prohibited_url before any browser call",
@@ -72,7 +73,8 @@
   "f4_agent": "BrowserAgent(approval_mode='strict' default for library compatibility); _approval_reason(..., mode='strict') delegates; step records carry approval audit (host_policy or host_token via callback); compose_page_state(..., mode)",
   "f4_test_env": "Transport tests that exercise pre-mode pausing of ordinary actions (MCP drag, websocket 'Socket' button, ordinary reload, F2 stale-approval 'Free action') pin BROWSER_APPROVAL_MODE=strict explicitly",
   "f4_word_refinement": "Parent-required: consequential needs whole-word risk name (links: leading imperative word, added after the Wikipedia smoke paused 'Hypertext Transfer Protocol'), submit/risky/POST form, or action-like URL segment/query token (delete|remove|logout|log-out|signout|sign-out|unsubscribe|subscribe|submit|publish|send|confirm|accept|authorize|transfer|checkout|purchase|buy|pay bounded by [/?&=;] and [/?&=;.#]); substring-only legacy matches -> ordinary. Same for classify_navigation (substring-only -> ordinary) and network 'URL names' reason. Tier none-ness unchanged (parity). Critical rules unchanged: known remaining false-positive class, e.g. a content link named 'Payment' or href '/how-to-buy-x' is critical",
-  "f4_link_cap": "Parent decision 2026-10-11: plain link activation (role link, no submit/POST/risky) is a GET navigation; payment-like link names/hrefs capped at consequential. Buttons, submit controls, forms, sensitive fills and network plans keep the critical floor. Tier none-ness unchanged"
+  "f4_link_cap": "Parent decision 2026-10-11: plain link activation (role link, no submit/POST/risky) is a GET navigation; payment-like link names/hrefs capped at consequential. Buttons, submit controls, forms, sensitive fills and network plans keep the critical floor. Tier none-ness unchanged",
+  "f4b_retry": "BrowserSession.observe holds the lock and calls _observe_once (unchanged single read-only collection + screenshot revalidation) up to 3 attempts within a 1.5 s deadline, backoff 0.15*attempt s; only StaleObservationError is retried (collection-phase or revalidation stale; observe never dispatches input); each retry discards the failed revision and collects a new one. Success after retry adds settle_retries (also in compact output). Exhaustion re-raises the stale error with diagnostic {code: page_settling, observe_attempts, message, cause?}. act/check_observation/upload/download unchanged (fail-fast)"
  },
  "research": [
   {
@@ -155,9 +157,19 @@
    "docs/browser.md",
    ".env.example",
    "agents/autonomy.json"
+  ],
+  "F4b": "implemented and verified 2026-10-11",
+  "F4b_changed": [
+   "src/browser_automation/browser.py",
+   "src/browser_automation/service.py",
+   "tests/test_browser.py",
+   "tests/test_service.py",
+   "docs/browser.md",
+   "docs/integrations.md",
+   "agents/autonomy.json"
   ]
  },
- "requested_verification": "F4 done; final unified verification at parent's discretion",
+ "requested_verification": "F4b done; final unified verification at parent's discretion",
  "blockers": [],
  "verification": {
   "F1": {
@@ -333,6 +345,44 @@
     "command": "BROWSER_INTEGRATION_TESTS=1 uv run --extra http pytest tests/test_approval_policy.py tests/test_agent.py tests/test_agent_surface.py tests/test_service.py tests/test_browser.py --basetemp=<scratchpad>/f4b -p no:cacheprovider",
     "first_run": "1 failed, 134 passed, 150.96s: test_attached_disconnect_preserves_user_tabs TimeoutError connecting over CDP to the throwaway external Chromium (code path untouched by F4); passed alone in 2.21s",
     "rerun": "135 passed, 0 failed, 36.46s"
+   }
+  },
+  "F4b": {
+   "date": "2026-10-11",
+   "suite": {
+    "command": "BROWSER_PROOF_DIR=/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/proof-f4b BROWSER_INTEGRATION_TESTS=1 uv run --extra http pytest tests/test_browser.py tests/test_browser_visual.py tests/test_browser_observation.py tests/test_browser_context.py tests/test_service.py tests/test_service_stdio.py tests/test_agent.py --basetemp=/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/f4b-retry -p no:cacheprovider",
+    "result": "112 passed, 0 failed, 58.88s (first run)"
+   },
+   "proof": "/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/proof-f4b/settled-proof.png",
+   "wikipedia_standard_smoke_no_client_retries": {
+    "script": "/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/f4b_wiki_smoke.py",
+    "runs": 3,
+    "client_stale_errors_observe": [
+     0,
+     0,
+     0
+    ],
+    "client_stale_errors_act": [
+     0,
+     0,
+     0
+    ],
+    "paused": [
+     0,
+     0,
+     0
+    ],
+    "settle_retries_after_search": [
+     1,
+     0,
+     1
+    ],
+    "settle_retries_after_link": [
+     1,
+     0,
+     1
+    ],
+    "note": "act remains fail-fast; earlier runs (F4) occasionally saw a pre-input act stale after the search autocomplete expanded; none occurred in these 3 runs"
    }
   }
  },
