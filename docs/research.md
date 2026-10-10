@@ -15,6 +15,82 @@ Primary sources accessed **2026-10-08**. Documentation can change; recheck curre
 | [Claude Code MCP](https://code.claude.com/docs/en/mcp.md) | `claude mcp add --transport stdio NAME -- COMMAND ARGS`; project-scoped server setup requires user workspace/server approval. |
 | [Hermes MCP](https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp) | `~/.hermes/config.yaml` uses `mcp_servers` with command/args/env. Stdio does not blindly inherit the whole shell environment; configure keys explicitly only when live provider execution is required. |
 
+## Autonomy round gate — 2026-10-11
+
+**Motivation.** The parent ran a real headless session on 2026-10-10 and found five problems:
+1. Nearly every ordinary button click or Enter paused for host approval.
+2. There was no way to navigate an existing tab.
+3. Observations were huge: Wikipedia ~50 KB and Hacker News ~111 KB of JSON before the screenshot, with every element carrying geometry and 64 visual regions added on screenshot observations.
+4. A stale observation could still mint a pending approval that failed only after the human approved it.
+5. Covered elements were listed without a flag.
+
+The user approved fixing all five with feature-sized commits. The round's durable state is `autonomy_round_2026_10_10` in [`agents/workstreams.json`](../agents/workstreams.json) and in [`agents/autonomy.json`](../agents/autonomy.json). Shipped contracts are in [integrations](integrations.md#host-approval-modes), [browser](browser.md#settling-after-input), [network](network.md) and [providers](providers.md).
+
+**Primary sources.**
+- Playwright Python [`Page`](https://playwright.dev/python/docs/api/class-page), accessed 2026-10-10:
+  - `goto` `wait_until` values.
+  - `wait_for_load_state` resolves immediately when the state is already reached.
+  - `framenavigated` semantics, and `wait_for_event` throws when the page closes.
+- Playwright 1.63.0 installed client/server sources, accessed 2026-10-10: a new-document commit clears lifecycle before `framenavigated`; same-document commits do not.
+- Playwright Python [`Mouse`](https://playwright.dev/python/docs/api/class-mouse), accessed 2026-10-11: `mouse.wheel` does not wait for scrolling to finish.
+- MCP client environment configuration, accessed 2026-10-11:
+  - [Codex](https://learn.chatgpt.com/docs/extend/mcp?surface=cli): `codex mcp add NAME --env K=V -- CMD`, plus config `env` and `env_vars`.
+  - [Claude Code](https://code.claude.com/docs/en/mcp): `claude mcp add --env K=V --transport stdio NAME -- CMD`; another option must separate `--env` from the name.
+  - [Hermes](https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp): `mcp_servers.NAME.env`; the shell environment is not inherited.
+
+**Environment.** macOS Darwin 27, Python 3.13 via uv, Playwright 1.63.0, Chromium headless shell v1243 installed by `uv run playwright install chromium`. The attached-browser tests also launched a throwaway external Chromium over CDP. No native personal Chrome was used and no live provider was called.
+
+**Baseline before changes, 2026-10-10.** `BROWSER_INTEGRATION_TESTS=1 uv run --extra http pytest -q` gave **2 failed, 194 passed in 113.90s**:
+- `test_service_omp.py::test_actual_omp_extension_load` failed because the local `omp` 18.2.1 rejects `--no-ui`. This is environment/version.
+- `test_service_stdio.py::test_cli_persistent_real_browser` exceeded asyncio's default 64 KiB `StreamReader` line limit with macOS screenshot JSON. This was a test-harness bug, fixed in F1.
+
+The earlier `-x` run gave 1 failed, 186 passed in 124.84s.
+
+| Feature | Commit | Scoped verification (real Chromium, macOS) |
+| --- | --- | --- |
+| F1 navigate + settle | `687cf22` | 6 files: **82 passed** in 63.74s. MCP stdio smoke: new_tab → navigate → link click → `navigation.status: complete`, then a fresh observe rendered "Second page rendered". |
+| F2 stale approvals / covered | `481041a` | 11 files: **162 passed** in 86.62s (first run 161 before the wrapped-link test was added). HN 147 elements, 0 covered. Wikipedia 66 elements, 1 covered: a 0.53 px viewport-edge sliver that the act guard also rejects. |
+| F3 compact observe | `5aae8c3` | 11 files: **165 passed** in 92.49s (first run 1 failed on a wrong test expectation for the native link `drag` op, then corrected). |
+| F4 approval modes | `cb059ae` | Full suite with OMP load deselected: **268 passed** in 141.05s. After the link-tier cap, a 5-file rerun gave **135 passed** in 36.46s. The first rerun attempt had 1 CDP-connect timeout in `test_attached_disconnect_preserves_user_tabs` (path untouched); it passed alone and on rerun, and is recorded as a flake. Strict parity was checked against a frozen copy of the legacy classifier over ~40,500 cases. |
+| F4b observe settle retry | `3e598bb` | 7 files: **112 passed** in 58.88s on the first run. |
+| F4c wheel scroll settle | `1d1b9cd` | 5 files: **95 passed, 3 deselected** in 32.72s. The 3 attached-external-Chrome tests (`test_attached_disconnect_preserves_user_tabs`, `test_navigate_refuses_preexisting_user_tab`, `test_native_discovery_requires_consent_and_chrome_optin`) were **not rerun** after this change, because the screen was locked (`CGSSessionScreenIsLocked`). They passed in the unified gate below. |
+
+**Unified gate at `e8d79f9`, before F4c.**
+
+```sh
+BROWSER_INTEGRATION_TESTS=1 uv run --extra http pytest tests \
+  --deselect tests/test_service_omp.py::test_actual_omp_extension_load
+uv build
+```
+
+Result: **273 passed, 1 deselected in 141.61s**, with no failures. `uv build` produced the sdist and wheel. This is one full-suite result, not a sum of scoped runs. F4c landed after this gate with the scoped result above. Rerunning its three attached tests with the screen unlocked is an **open blocker**.
+
+**Real-site measurements.** All are browser-only, single runs on an uncontrolled network, headless isolated Chromium. None are model latency.
+
+| Measurement | Result |
+| --- | --- |
+| Compact vs full `observe` (JSON bytes, no screenshot) | Hacker News 84,122 → 26,805 B (31.9%). Wikipedia `Web_browser` 38,975 → 12,201 B (31.3%). |
+| Same, with a screenshot grid | Compact is 26.5% (HN) and 21.8% (Wikipedia) of full. |
+| Compact observe time | 33–65 ms |
+| Wikipedia MCP stdio smoke, `standard` mode (F4) | Fill search, Enter, then click a content link: 0 approval pauses in 3 runs. Ordinary actions ran with an audit. |
+| Wikipedia smoke without client retries (F4b) | 0 stale errors on observe/act and 0 pauses in 3 runs. Internal `settle_retries`: 1/0/1 after search and 1/0/1 after the link click. |
+| Hacker News `/newest` scroll smoke (F4c) | 3/3 runs: scroll settled, `moved.y` 529 in 169–176 ms, "More" present in the immediate observe, and the click navigated to `newest?next=…` with 0 pauses. |
+
+Before F4c, the parent found through its own MCP stdio use that a scroll returned before smooth scrolling finished, so the immediate observe lacked "More".
+
+**Parent's own MCP client session.**
+- In `standard` mode: an ordinary "Add" ran with a `host_policy` audit, "Delete all" paused (consequential) and a password fill paused (critical).
+- In `autonomous` mode: "Delete all" ran and the password fill still paused.
+- Link, navigate and HN flows ran.
+- The parent viewed the screenshots `wiki-after-link.png`, `autonomous-delete-proof.png`, `covered-proof.png` and the F1 smoke screenshot. These stay machine-local and out of Git.
+
+**Limits.**
+- The OMP extension-load test is not runnable here (`omp` 18.2.1 lacks `--no-ui`).
+- The 3 attached-external-Chrome tests were not rerun after F4c.
+- No native personal Chrome attach, no paid or live model call, no Linux rerun and no competitor comparison.
+- Approval tiers are a word- and segment-based heuristic, not a semantic safety proof. A content link named "Payment" is still classified consequential.
+- `autonomous` is host standing approval, intended only for trusted tasks in isolated or dedicated profiles.
+
 ## Network DevTools capability research — 2026-10-09
 
 The active network workstream is [`agents/network-devtools.json`](../agents/network-devtools.json); the parent reviews/coordinates and workers implement. The [network guide](network.md) documents real request data, context-authenticated calls/replay and explicit multi-tab capture. Earlier counts/results below remain historical evidence, not proof of the expanded network capability.

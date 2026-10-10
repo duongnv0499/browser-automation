@@ -18,6 +18,45 @@ For agent-native diagnosis, see [navigation/coverage and frame safety](docs/brow
 
 For DevTools-style API work, follow [the network workflow](docs/network.md): list tabs, start capture before acting, inspect request/response chunks, then call or replay in the selected browser cookie context. Ordinary same-origin safe reads execute directly; consequential/foreign-origin/credential-edited plans require exact host approval. All authorized HTTP(S) endpoints and methods remain callable, and API responses are distinct from rendered UI verification.
 
+## Agent-friendly autonomy
+
+External agents (Codex, Claude Code, Hermes, OMP) can drive the browser step by step without a human confirming every ordinary click, while the guards stay authoritative:
+
+- **`navigate`** moves a tab this session owns (`new_tab` or its popups) to an HTTP(S)/`about:blank` URL. A preexisting user tab is refused with `not_owned_tab` (use `new_tab`). A timeout keeps the tab and reports `navigation_status: "timeout"`.
+- **Settle after input.** `act` accepts `settle_ms` (0–10000; default 1000 for click/press/drag) and reports `navigation: {started, status, url}`. A click that starts no navigation returns after the settle window, not the navigation timeout. Wheel `scroll` waits (≤1.5 s) for scrolling to stop and reports `scroll: {settled, moved}`. These are settle signals, not success: observe again to verify.
+- **Compact `observe` by default.** Elements are returned as `{id, role, name, ops}` plus only non-default state. `detail: "full"` returns the complete previous shape (needed for x/y refinement), `visual_regions: true` lists screenshot-grid targets, and `text_scope: "document"` reads text beyond the viewport. On single real-page runs, compact output was about a third of the full size (Hacker News 84,122 → 26,805 B; Wikipedia 38,975 → 12,201 B).
+- **Earlier, clearer guard results.** Elements whose input point is covered are listed with `covered: true` and no operations. `act` revalidates an observation before minting an approval, so a stale revision fails at once instead of after the host approves. Cached observations are dropped after input. `observe` absorbs brief post-navigation churn with a bounded read-only retry (`settle_retries`).
+- **Host approval modes.** `BROWSER_APPROVAL_MODE` is host policy set in the server environment, never a tool argument. One classifier assigns each action a tier: none, ordinary, consequential or critical.
+
+| Mode | Pauses for a per-action host approval token |
+|---|---|
+| `strict` | ordinary and above: the previous behaviour, with identical decisions and reasons |
+| `standard` (default) | consequential and above (submit/POST forms, delete/send/publish/log-out-style controls, uploads/downloads, state-changing or foreign-origin API plans, risky navigation) |
+| `autonomous` | critical only. The host grants standing approval for everything else |
+
+Critical actions always pause in every mode: payment buttons, submit controls and forms, sensitive or credential input, account deletion, and credential-header edits. A plain link with a payment-like name is a GET navigation and is capped at consequential. An action that runs with a non-`none` tier returns `approval: {source, mode, tier, reason}`. `source` is `host_policy` for standing approval and `host_token` for an exact token. The audit records authority, not success. Set the mode in the MCP registration's server environment:
+
+```bash
+# Codex (or put BROWSER_APPROVAL_MODE=... in the private .env loaded by --env-file)
+codex mcp add browser-automation --env BROWSER_APPROVAL_MODE=standard -- /ABSOLUTE/PATH/uv \
+  --directory /ABSOLUTE/PATH/browser-automation run --env-file /ABSOLUTE/PATH/browser-automation/.env browser-agent-mcp
+# Claude Code (another option must separate --env from the server name)
+claude mcp add --env BROWSER_APPROVAL_MODE=standard --transport stdio browser -- \
+  uv --directory /ABSOLUTE/PATH/browser-automation run browser-agent-mcp
+```
+
+```yaml
+# Hermes ~/.hermes/config.yaml
+mcp_servers:
+  browser:
+    command: uv
+    args: ["--directory", "/ABSOLUTE/PATH/browser-automation", "run", "browser-agent-mcp"]
+    env:
+      BROWSER_APPROVAL_MODE: standard
+```
+
+Use `autonomous` only for trusted tasks in an isolated or dedicated browser profile, never as a default for a personal logged-in profile. It lets an agent delete, send, submit, log out, call state-changing APIs and transfer files inside `BROWSER_FILES_DIRECTORY` without asking. An invalid value fails every tool call except `doctor`, which reports the mode or the error; it is never treated as a more permissive mode. Model providers still receive the page text and screenshots you send them, and CDP still exposes the whole attached profile. See [host approval modes](docs/integrations.md#host-approval-modes) and [settling after input](docs/browser.md#settling-after-input).
+
 ## Let your coding agent install
 
 Paste this into Codex (with permission to install local tools):
@@ -183,6 +222,16 @@ Then start `hermes chat`. Hermes does not blindly inherit the entire shell envir
 CDP can access sensitive data throughout the profile. Models receive selected page text and screenshots when inference is enabled. Do not send passwords, private account data, or internal pages to a provider without authorization. Page content is untrusted; it cannot approve actions or override your goal/policy. Upload/download paths and approvals must come from the trusted host. Private artifacts, keys, profiles, and raw traces are ignored by Git.
 
 No matched benchmark against Jev or Codex has been run. Browser-only latency, deterministic local-provider loop latency, and live paid-model end-to-end latency are distinct metrics. Offline provider tests do not prove a paid live API call; an isolated fixture does not prove attachment to a logged-in user profile. See [dated research and evidence boundaries](docs/research.md).
+
+The **autonomy round gate, 2026-10-11** ran on macOS (Darwin 27, Python 3.13 via uv, Playwright 1.63.0, Chromium headless shell). At `e8d79f9`, `BROWSER_INTEGRATION_TESTS=1 uv run --extra http pytest tests --deselect tests/test_service_omp.py::test_actual_omp_extension_load` passed **273 tests, 1 deselected, in 141.61s**, and `uv build` produced the sdist and wheel.
+- The deselected OMP extension-load test cannot run here because the local `omp` 18.2.1 lacks `--no-ui`.
+- The later scroll-settle fix (`fix(act)`) passed 95 scoped tests. Its 3 attached-external-Chrome tests were **not rerun** after that change because the Mac screen was locked; they passed in the gate above.
+- Real-site sizes and smokes (Hacker News, Wikipedia) are browser-only, single runs on an uncontrolled network.
+- The parent's own MCP client session checked the tiers:
+  - `standard`: an ordinary Add ran with an audit; "Delete all" and a password fill paused.
+  - `autonomous`: "Delete all" ran; the password fill still paused.
+
+No personal native Chrome, paid model call or competitor comparison was exercised. See [the autonomy evidence](docs/research.md#autonomy-round-gate--2026-10-11). The earlier gates below remain historical evidence.
 
 The authorized **network release gate, 2026-10-09**, passed **196 tests in 299.70s** (Python 3.13.12), with no reported skips/failures. It includes real Chromium, detailed/binary network data, multi-tab/pop-up capture, cookie-context calls/replay, exact approvals and cancellation recovery, official stdio/current+legacy HTTP consumers, CLI and actual OMP loader/callbacks, alongside earlier browser/agent safety coverage:
 

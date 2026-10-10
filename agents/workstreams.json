@@ -414,11 +414,31 @@
         "verification": "Autonomy macOS 2026-10-11: 7-file scoped suite (test_browser, test_browser_visual, test_browser_observation, test_browser_context, test_service, test_service_stdio, test_agent) -> 112 passed, 0 failed in 58.88s first run; Wikipedia MCP stdio smoke x3 in standard mode without client retries: 0 stale errors on observe/act, 0 approval pauses; internal retries absorbed 1/0/1 after search and 1/0/1 after link click"
       },
       {
+        "id": "F4c",
+        "owner": "Autonomy",
+        "commit": "fix(act): wait for wheel scrolling to settle",
+        "scope": "Parent found via its own MCP stdio use that HN /newest scroll returned before smooth scrolling finished (immediate observe lacked 'More'). After wheel input wait (<=1.5s) for window + scrolled-container offsets to be stable; report scroll {settled, moved}; bound site/external_chrome test fixtures so failures cannot hang the suite",
+        "status": "committed 1d1b9cd, pushed origin/main 2026-10-11",
+        "verification": "Autonomy+parent macOS 2026-10-11: tests/test_browser.py tests/test_browser_observation.py tests/test_browser_visual.py tests/test_service.py tests/test_agent.py -> 95 passed, 3 deselected in 32.72s; HN smoke 3/3 (scroll settled, moved.y 529 in 169-176 ms, 'More' in immediate observe, click -> newest?next=..., 0 approval pauses). 3 attached-external-Chrome tests NOT rerun after this change (macOS screen locked, CGSSessionScreenIsLocked=true at 00:55 +07); they passed in the unified gate at e8d79f9"
+      },
+      {
         "id": "F5",
         "owner": "Harness",
         "commit": "docs(release): document autonomy round and verification",
         "scope": "README, CHANGELOG, docs/architecture.md, docs/research.md evidence, install.md (BROWSER_APPROVAL_MODE in MCP registration examples), skills/browser-automation/SKILL.md, AGENTS.md security wording (explicit approval = per-action host token OR host-configured standing approval mode; critical payment/credential actions always per-action), agents/workstreams.json",
-        "status": "pending"
+        "status": "committed in docs(release) commit (hash reported by GitOwner handoff; a commit cannot embed its own hash), pushed origin/main 2026-10-11",
+        "changed": [
+          "AGENTS.md",
+          "README.md",
+          "CHANGELOG.md",
+          "docs/architecture.md",
+          "docs/research.md",
+          "docs/http.md",
+          "install.md",
+          "skills/browser-automation/SKILL.md",
+          "agents/workstreams.json"
+        ],
+        "research": "Client MCP env syntax rechecked 2026-10-11: Codex `codex mcp add NAME --env K=V -- CMD` + config env/env_vars (https://learn.chatgpt.com/docs/extend/mcp?surface=cli); Claude Code `claude mcp add --env K=V --transport stdio NAME -- CMD` (https://code.claude.com/docs/en/mcp); Hermes mcp_servers.NAME.env (https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp)"
       }
     ],
     "ownership": {
@@ -509,11 +529,26 @@
       {
         "hash": "3e598bb",
         "message": "fix(observe): retry read-only revalidation while the page settles"
+      },
+      {
+        "hash": "1d1b9cd",
+        "message": "fix(act): wait for wheel scrolling to settle"
       }
     ],
-    "status": "F1-F4b committed; awaiting parent's final unified gate, then F5 release docs (Harness)",
+    "status": "Complete except open blocker: F1-F4c and F5 docs committed and pushed; 3 attached-external-Chrome tests await rerun with unlocked screen",
     "open_followups": [
       "Intermittent stale_observation (2/~30) on screenshot observe while Wikipedia still loading; pre-existing revalidation behaviour noted during F3 verification, tracked for follow-up -> addressed by F4b 3e598bb"
+    ],
+    "unified_gate_2026_10_11": {
+      "commit": "e8d79f9 (after F4b, before F4c)",
+      "command": "BROWSER_INTEGRATION_TESTS=1 uv run --extra http pytest tests --deselect tests/test_service_omp.py::test_actual_omp_extension_load",
+      "result": "273 passed, 1 deselected in 141.61s; uv build OK (sdist+wheel)",
+      "deselected_reason": "local omp 18.2.1 lacks --no-ui (environment)",
+      "parent_mcp_session": "standard: Add ran (ordinary, audited), Delete all paused (consequential), password fill paused (critical); autonomous: Delete all ran, password fill paused; link/navigate/HN flows ran",
+      "limits": "No native personal Chrome attach, no paid/live model call, no competitor comparison; real-site measurements browser-only single runs on uncontrolled network"
+    },
+    "open_blockers": [
+      "Rerun tests/test_browser.py::test_attached_disconnect_preserves_user_tabs, ::test_navigate_refuses_preexisting_user_tab, ::test_native_discovery_requires_consent_and_chrome_optin with the macOS screen unlocked (not rerun after F4c 1d1b9cd; passed at e8d79f9)"
     ]
   },
   "network_devtools_phase_2026_10_09": {
@@ -523,8 +558,8 @@
     "historical_sections": "Earlier release sections and counts remain historical evidence, not acceptance of the current network cutover"
   },
   "current_phase": {
-    "feature": "autonomy round 2026-10-10",
-    "phase": "F4b committed 3e598bb and pushed; next: parent-authorized final unified suite + real-browser evidence gate, then F5 release docs/state commit by Harness",
+    "feature": "autonomy round 2026-10-10/11",
+    "phase": "Complete except open blocker (3 attached-external-Chrome tests not rerun after F4c because the macOS screen was locked). Commits 28fd973 bootstrap, 687cf22 F1, 481041a F2, 5aae8c3 F3, cb059ae F4, 3e598bb F4b, 1d1b9cd F4c, then docs(release) F5; unified gate 273 passed/1 deselected at e8d79f9",
     "active_section": "autonomy_round_2026_10_10",
     "active_tracker": "agents/autonomy.json",
     "historical_sections": "network_devtools_phase_2026_10_09 and earlier sections remain historical evidence, not acceptance of this round"

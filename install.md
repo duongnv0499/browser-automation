@@ -59,6 +59,14 @@ PY
 
 On Windows, also apply a user-only ACL appropriate to the host; POSIX mode bits alone are not a Windows privacy guarantee. Report API-key **presence only**. Preserve existing credentials and host settings; warn privately about unsafe permissions rather than printing secrets. `.env` is explicitly loaded by `uv --env-file`; the package does not auto-load it. Never put keys in MCP TOML, command arguments, shell history, Git, or diagnostic artifacts.
 
+`BROWSER_APPROVAL_MODE` (`strict` | `standard` | `autonomous`) is host policy for the **MCP server process**, never a tool argument. When unset it is `standard`: consequential actions (submits, POST forms, delete/send/log-out-style controls, uploads/downloads, state-changing or foreign-origin API plans, risky navigation) and all critical actions pause for an exact host token. Ordinary clicks and Enter do not pause.
+- **Install default:** leave it unset unless the operator explicitly chooses a mode. Do not select `autonomous` merely to finish installation or to avoid prompts.
+- **Where to set it:** in the server's private `.env` (loaded by `--env-file`), or in the registration's server environment: Codex `codex mcp add NAME --env BROWSER_APPROVAL_MODE=standard -- ...` or `[mcp_servers.NAME.env]`, Claude Code `claude mcp add --env BROWSER_APPROVAL_MODE=standard --transport stdio NAME -- ...`, or the Hermes `mcp_servers.NAME.env` mapping. For HTTP, set it in the browser-host server's environment, not the client's.
+- **`autonomous`:** grants standing approval for everything except critical payment, credential/sensitive-input, account-deletion and credential-header actions. Reserve it for trusted tasks in an isolated or dedicated profile.
+- **Checking:** `doctor` reports `approval_mode` (or `approval_mode_error`), and an invalid value fails every other tool.
+
+See [host approval modes](docs/integrations.md#host-approval-modes).
+
 Leave `BROWSER_RECOVERY_POLICY`, `BROWSER_MONITOR_PAYLOADS` and `BROWSER_NETWORK_SENSITIVE` unset unless the operator explicitly requests their reviewed scope; installation must not grant reload exceptions or sensitive traffic disclosure. Ordinary sanitized network detail/body inspection needs no provider key. Calls/replay support the browser cookie context across multiple tabs: ordinary same-origin safe reads execute directly, while consequential plans need exact host approval; the operator may require approval for all calls with `BROWSER_NETWORK_REQUIRE_APPROVAL=1`. Installation does not approve account API operations. `interpret_visual` remains a separate opt-in paid call and progress a per-call opt-in, not OS-screen monitoring. See [network workflow/privacy](docs/network.md) and [recovery boundaries](docs/providers.md#operator-controlled-recovery).
 
 ## 3. Register MCP idempotently
@@ -84,7 +92,7 @@ codex mcp get "$MCP_NAME" --json
 
 The saved command must contain actual absolute paths, not literal `$UV_BIN`, `$INSTALL_DIR`, `~`, or placeholders. Inspect the resulting transport/arguments and preserve unrelated entries. CLI output/config listing alone does **not** prove the server works. Existing disabled/filtered entries require a user-approved enablement or a separate unused name; do not silently loosen policy.
 
-The `.env` supplies server credentials and consent policy. Alternatively, advanced hosts can forward only required environment variable names using Codex `env_vars`; do not mix conflicting credential sources or hardcode secret values. See [integrations](docs/integrations.md#mcp-stdio).
+The `.env` supplies server credentials, consent and approval-mode policy. Alternatively, advanced hosts can forward only required environment variable names using Codex `env_vars`; do not mix conflicting credential sources or hardcode secret values. See [integrations](docs/integrations.md#mcp-stdio).
 
 ### Opt-in: Streamable HTTP
 
