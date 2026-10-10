@@ -222,6 +222,26 @@ _GUARD = """({token,node,point,signature,clip}) => {
 }"""
 
 
+# Read-only scroll probe (isolated world). begin=True records the scrollable ancestors of
+# the hit-tested input point; every call returns their offsets plus the window offset.
+_SCROLL_PROBE = """({x,y,begin}) => {
+ const key='__browserAutomationScrollProbe_v1';
+ if(begin){
+  let hit=document.elementFromPoint(x,y);
+  while(hit?.shadowRoot){const inner=hit.shadowRoot.elementFromPoint(x,y);if(!inner||inner===hit)break;hit=inner;}
+  const chain=[];
+  for(let e=hit;e&&chain.length<8;e=e.parentElement||e.getRootNode().host){
+   if(e===document.documentElement||e===document.body||e===document.scrollingElement)continue;
+   const s=getComputedStyle(e);
+   if(/auto|scroll|overlay/.test(s.overflowY)&&e.scrollHeight>e.clientHeight+1||/auto|scroll|overlay/.test(s.overflowX)&&e.scrollWidth>e.clientWidth+1)chain.push(e);
+  }
+  globalThis[key]=chain;
+ }
+ const chain=globalThis[key]||[];
+ return {elements:chain.map(e=>e.isConnected?[e.scrollLeft,e.scrollTop]:null),window:[scrollX,scrollY]};
+}"""
+
+
 class BrowserSession:
     """Sessions serialize operations. Attached sessions never own existing tabs."""
 
@@ -1135,6 +1155,52 @@ class BrowserSession:
         async with self._lock:
             return await self._act(tab_id, action)
 
+    async def _scroll_probes(self, main_frame: _FrameRef, target: _Target | None, point: tuple[float, float]) -> list[tuple[_FrameRef, dict[str, float], Any]]:
+        """Record scroll containers under the wheel point (target frame first, then main frame) before input."""
+        probes = []
+        frames = [(target.frame, None)] if target is not None and target.frame.parent_frame is not None else []
+        frames.append((main_frame, (0.0, 0.0)))
+        for frame, offset in frames:
+            if offset is None:
+                ox, oy, _ = await self._frame_geometry(frame)
+                offset = (ox, oy)
+            local = {'x': point[0] - offset[0], 'y': point[1] - offset[1]}
+            probes.append((frame, local, await self._eval(frame, _SCROLL_PROBE, {**local, 'begin': True})))
+        return probes
+
+    async def _scroll_settle(self, probes: list[tuple[_FrameRef, dict[str, float], Any]], bound_s: float = 1.5) -> dict[str, Any]:
+        """Wait (bounded) until wheel scrolling stops: two consecutive equal samples ~50 ms apart.
+
+        Playwright's mouse.wheel does not wait for scrolling to finish. A no-movement result is
+        accepted only after 150 ms so a not-yet-started smooth scroll is not reported as 0.
+        moved is the actual delta of the innermost container that moved (0 at the end).
+        """
+        def flatten(samples: list[Any]) -> list[Any]:
+            return [position for sample in samples for position in [*sample['elements'], sample['window']]]
+        before = flatten([sample for _, _, sample in probes])
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        previous, current, settled = None, before, False
+        try:
+            while True:
+                await asyncio.sleep(0.05)
+                current = flatten([await self._eval(frame, _SCROLL_PROBE, {**local, 'begin': False}) for frame, local, _ in probes])
+                elapsed = loop.time() - started
+                if current == previous and (current != before or elapsed >= 0.15):
+                    settled = True
+                    break
+                if elapsed >= bound_s:
+                    break
+                previous = current
+        except (PlaywrightError, BrowserError):
+            return {'settled': False, 'moved': None, 'reason': 'scroll_probe_unavailable'}
+        moved = {'x': 0.0, 'y': 0.0}
+        for old, new in zip(before, current):
+            if old is not None and new is not None and old != new:
+                moved = {'x': new[0] - old[0], 'y': new[1] - old[1]}
+                break
+        return {'settled': settled, 'moved': moved}
+
     async def _guard_protected_input(self, page: Any, points: list[tuple[float, float]], *, keyboard: bool = False) -> None:
         frames = await self._frames(page)
         protected, _ = await self._protected_frames(frames)
@@ -1233,6 +1299,7 @@ class BrowserSession:
         # Invalidate before dispatch, including failed/partial operations.
         self._invalidate(tab_id)
         navigation_status = None
+        scroll = None
         # Listeners precede input so a synchronous navigation start is never missed.
         watch = _NavigationWatch(page)
         try:
@@ -1266,13 +1333,16 @@ class BrowserSession:
                         raise UnsafeActionError('Target could not be focused for keyboard input')
                 await page.keyboard.press(key)
             elif operation == 'scroll':
+                main_frame = (await self._frames(page))[0]
                 if point:
-                    await page.mouse.move(*point)
+                    wheel_point = point
                 else:
-                    main_frame = (await self._frames(page))[0]
                     view = await self._eval(main_frame,'({x:innerWidth/2,y:innerHeight/2})')
-                    await page.mouse.move(view['x'],view['y'])
+                    wheel_point = (view['x'], view['y'])
+                await page.mouse.move(*wheel_point)
+                probes = await self._scroll_probes(main_frame, target, wheel_point)
                 await page.mouse.wheel(dx, dy)
+                scroll = await self._scroll_settle(probes)
             elif operation == 'drag':
                 await page.mouse.move(*point)
                 await page.mouse.down()
@@ -1309,6 +1379,8 @@ class BrowserSession:
                     self._owned.add(popup)
                 popup_ids.append(self._ids[popup])
         result = {'operation': operation, 'tab_id': tab_id, 'url': page.url, 'popup_tabs': popup_ids, 'navigation': navigation, 'latency_ms': (time.perf_counter()-started)*1000}
+        if scroll is not None:
+            result['scroll'] = scroll
         if navigation_status is not None:
             result.update(navigation_status=navigation_status, wait_until=action.get('wait_until', 'domcontentloaded'))
             if navigation_status == 'timeout':

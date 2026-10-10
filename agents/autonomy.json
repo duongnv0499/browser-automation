@@ -39,9 +39,10 @@
   "F2": "COMMITTED 481041a (pushed)",
   "F3": "COMMITTED 5aae8c3 (pushed)",
   "F4": "COMMITTED cb059ae (pushed)",
-  "F4b": "VERIFIED_awaiting_GitOwner_commit"
+  "F4b": "COMMITTED 3e598bb (pushed)",
+  "F4c": "VERIFIED_with_environment_blocker_awaiting_GitOwner_commit"
  },
- "current_feature": "F4b observe settle retry (commit: fix(observe): retry read-only revalidation while the page settles)",
+ "current_feature": "F4c wheel scroll settle (commit: fix(act): wait for wheel scrolling to settle)",
  "decisions": {
   "navigate_ownership": "BrowserSession.navigate accepts only pages in _owned (new_tab or popups of owned tabs) in both attached and isolated sessions; otherwise NotOwnedTabError(UnsafeActionError) code not_owned_tab, recommended_next_action new_tab",
   "navigate_url_rules": "Destination must pass BrowserSession._allowed_url (HTTP(S) with host or about:blank); service additionally applies web_url -> prohibited_url before any browser call",
@@ -74,7 +75,9 @@
   "f4_test_env": "Transport tests that exercise pre-mode pausing of ordinary actions (MCP drag, websocket 'Socket' button, ordinary reload, F2 stale-approval 'Free action') pin BROWSER_APPROVAL_MODE=strict explicitly",
   "f4_word_refinement": "Parent-required: consequential needs whole-word risk name (links: leading imperative word, added after the Wikipedia smoke paused 'Hypertext Transfer Protocol'), submit/risky/POST form, or action-like URL segment/query token (delete|remove|logout|log-out|signout|sign-out|unsubscribe|subscribe|submit|publish|send|confirm|accept|authorize|transfer|checkout|purchase|buy|pay bounded by [/?&=;] and [/?&=;.#]); substring-only legacy matches -> ordinary. Same for classify_navigation (substring-only -> ordinary) and network 'URL names' reason. Tier none-ness unchanged (parity). Critical rules unchanged: known remaining false-positive class, e.g. a content link named 'Payment' or href '/how-to-buy-x' is critical",
   "f4_link_cap": "Parent decision 2026-10-11: plain link activation (role link, no submit/POST/risky) is a GET navigation; payment-like link names/hrefs capped at consequential. Buttons, submit controls, forms, sensitive fills and network plans keep the critical floor. Tier none-ness unchanged",
-  "f4b_retry": "BrowserSession.observe holds the lock and calls _observe_once (unchanged single read-only collection + screenshot revalidation) up to 3 attempts within a 1.5 s deadline, backoff 0.15*attempt s; only StaleObservationError is retried (collection-phase or revalidation stale; observe never dispatches input); each retry discards the failed revision and collects a new one. Success after retry adds settle_retries (also in compact output). Exhaustion re-raises the stale error with diagnostic {code: page_settling, observe_attempts, message, cause?}. act/check_observation/upload/download unchanged (fail-fast)"
+  "f4b_retry": "BrowserSession.observe holds the lock and calls _observe_once (unchanged single read-only collection + screenshot revalidation) up to 3 attempts within a 1.5 s deadline, backoff 0.15*attempt s; only StaleObservationError is retried (collection-phase or revalidation stale; observe never dispatches input); each retry discards the failed revision and collects a new one. Success after retry adds settle_retries (also in compact output). Exhaustion re-raises the stale error with diagnostic {code: page_settling, observe_attempts, message, cause?}. act/check_observation/upload/download unchanged (fail-fast)",
+  "f4c_scroll": "act scroll: after mouse.move to the wheel point and before mouse.wheel, an isolated-world probe records up to 8 scrollable ancestors of the hit-tested point (target frame first if in a subframe, then main frame) plus window offsets; after the wheel, samples every 50 ms until two consecutive samples are equal (zero-movement accepted only after 150 ms), bounded 1.5 s; result scroll {settled, moved {x,y}} where moved = actual delta of the innermost container that moved (0 at end). Independent of settle_ms (navigation only). Probe failure -> {settled:false, moved:null, reason:scroll_probe_unavailable}",
+  "f4c_fixture_repairs": "tests/test_browser.py: site fixture uses close_clients() before wait_closed() and a 30 s header read timeout (an attached external Chrome kept idle preconnect sockets, hanging Python 3.13 wait_closed forever); external_chrome teardown kills Chrome if SIGTERM is not honoured within 5 s"
  },
  "research": [
   {
@@ -91,6 +94,11 @@
    "url": "file:.venv/lib/python3.13/site-packages/playwright/driver/package/lib/coreBundle.js (playwright 1.63.0 server)",
    "accessed": "2026-10-10",
    "facts": "frameCommittedNewDocumentNavigation calls _onClearLifecycle before firing the navigation event, so wait_for_load_state after a new-document framenavigated waits for the new document; frameCommittedSameDocumentNavigation fires navigated without clearing lifecycle; aborted navigations fire an error event that is not a public framenavigated"
+  },
+  {
+   "url": "https://playwright.dev/python/docs/api/class-mouse",
+   "accessed": "2026-10-11",
+   "facts": "mouse.wheel dispatches a wheel event; wheel events may cause scrolling if unhandled, and the method does not wait for the scrolling to finish before returning"
   }
  ],
  "implementation_state": {
@@ -167,10 +175,20 @@
    "docs/browser.md",
    "docs/integrations.md",
    "agents/autonomy.json"
+  ],
+  "F4c": "implemented; verified except environment-blocked external-Chrome tests",
+  "F4c_changed": [
+   "src/browser_automation/browser.py",
+   "tests/test_browser.py",
+   "docs/browser.md",
+   "docs/integrations.md",
+   "agents/autonomy.json"
   ]
  },
  "requested_verification": "F4b done; final unified verification at parent's discretion",
- "blockers": [],
+ "blockers": [
+  "Rerun tests/test_browser.py external_chrome tests (3) with the macOS screen unlocked"
+ ],
  "verification": {
   "F1": {
    "date": "2026-10-10",
@@ -383,6 +401,26 @@
      1
     ],
     "note": "act remains fail-fast; earlier runs (F4) occasionally saw a pre-input act stale after the search autocomplete expanded; none occurred in these 3 runs"
+   }
+  },
+  "F4c": {
+   "date": "2026-10-11",
+   "suite": {
+    "command": "BROWSER_PROOF_DIR=/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/proof-f4c BROWSER_INTEGRATION_TESTS=1 uv run --extra http pytest tests/test_browser.py tests/test_browser_observation.py tests/test_browser_visual.py tests/test_service.py tests/test_agent.py --deselect tests/test_browser.py::test_attached_disconnect_preserves_user_tabs --deselect tests/test_browser.py::test_navigate_refuses_preexisting_user_tab --deselect tests/test_browser.py::test_native_discovery_requires_consent_and_chrome_optin --basetemp=/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/f4c -p no:cacheprovider",
+    "result": "95 passed, 3 deselected, 32.72s",
+    "environment_blocker": "macOS screen locked since 2026-10-11 00:18:56 (ioreg CGSSessionScreenIsLocked=Yes). The external_chrome fixture launches the full Chrome for Testing binary with --headless=new; while locked it connects over CDP but cannot render or load any page (goto and screenshot time out in a standalone reproduction, also with anti-backgrounding flags). Playwright-launched chrome-headless-shell sessions are unaffected. The 3 external_chrome tests (all passed in the parent gate at e8d79f9 and in the F4b run) need rerunning with the screen unlocked; before the fixture repairs they hung the run indefinitely, now they fail within bounded time"
+   },
+   "new_test": "test_wheel_scroll_waits_until_offsets_settle (smooth-scroll page: moved.y equals actual scrollY, immediate observe shows bottom content/link; second scroll at end moved 0 within 1 s; overflow container reports its own scrollTop and window unchanged)",
+   "proof": "/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/proof-f4c/scroll-settled-proof.png",
+   "hn_smoke": {
+    "script": "/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/f4c_hn_smoke.py (MCP stdio, standard mode, headless; navigate /newest, scroll delta_y 6000, immediate observe, click More; no client sleeps/retries)",
+    "runs": 3,
+    "results": "3/3: More absent before scroll, scroll settled true moved.y 529 in 169-176 ms, More present in immediate observe, click executed (no approval) navigation complete to newest?next=...&n=31",
+    "screenshots": [
+     "/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/proof-f4c/hn-after-scroll-1.png",
+     "/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/proof-f4c/hn-after-scroll-2.png",
+     "/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/proof-f4c/hn-after-scroll-3.png"
+    ]
    }
   }
  },

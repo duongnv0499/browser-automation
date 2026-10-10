@@ -43,6 +43,10 @@ SETTLING_FIXTURE = b'''<!doctype html><html><head><title>Settling fixture</title
 function tick(){const done=!forever&&performance.now()-start>250;document.querySelector('#late').textContent=done?'Settled':'Frame '+(++n);if(!done)requestAnimationFrame(tick);}
 requestAnimationFrame(tick);</script>
 </body></html>'''
+SMOOTH_FIXTURE = b'''<!doctype html><html style="scroll-behavior:smooth"><head><title>Smooth fixture</title></head><body style="margin:0;font:18px sans-serif">
+<h1>Smooth top</h1><div style="height:4000px">Tall spacer</div><p>Bottom content</p><a href="/popup">Bottom link</a>
+<div aria-label="Inner box" style="position:fixed;right:10px;top:10px;width:220px;height:120px;overflow:auto;scroll-behavior:smooth;background:#eee"><div style="height:1000px">Inner content</div></div>
+</body></html>'''
 POLICY_FIXTURE = b'''<!doctype html><html><head><title>Policy fixture</title><style>body{font:18px sans-serif;margin:10px}button,input{margin:5px;padding:6px}</style></head><body>
 <h1 id="count">Count 0</h1>
 <button onclick="n++;document.querySelector('#count').textContent='Count '+n">Add</button>
@@ -86,13 +90,15 @@ async def site():
 
     async def handle(reader, writer):
         try:
-            request = await reader.readuntil(b'\r\n\r\n')
+            request = await asyncio.wait_for(reader.readuntil(b'\r\n\r\n'), 30)
             route = request.split(b' ')[1].decode().split('?')[0]
             length = next((int(line.split(b':', 1)[1]) for line in request.split(b'\r\n') if line.lower().startswith(b'content-length:')), 0)
             payload = await reader.readexactly(length) if length else b''
             headers = ''
             if route == '/api':
                 body = json.dumps({'method': request.split(b' ')[0].decode(), 'received': payload.decode()}).encode()
+            elif route == '/smooth':
+                body = SMOOTH_FIXTURE
             elif route == '/settling':
                 body = SETTLING_FIXTURE
             elif route == '/policy':
@@ -119,8 +125,8 @@ async def site():
                 body = main.replace('PORT', str(port)).encode()
             writer.write(f'HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {len(body)}\r\nConnection: close\r\n{headers}\r\n'.encode() + body)
             await writer.drain()
-        except (ConnectionError, asyncio.IncompleteReadError):
-            pass  # The browser may abandon a deliberately slow fixture response.
+        except (ConnectionError, asyncio.IncompleteReadError, asyncio.TimeoutError):
+            pass  # The browser may abandon a slow response or hold an idle preconnect socket.
         finally:
             writer.close()
             try:
@@ -134,6 +140,10 @@ async def site():
         yield f'http://127.0.0.1:{port}/'
     finally:
         server.close()
+        if hasattr(server, 'close_clients'):
+            # An attached external Chrome may outlive this fixture with idle preconnect
+            # sockets; Python 3.12+ wait_closed() would otherwise wait for them forever.
+            server.close_clients()
         await server.wait_closed()
 
 
@@ -641,6 +651,34 @@ async def test_observe_retries_read_only_revalidation_while_page_settles(browser
     assert time.perf_counter() - started < 1
 
 
+@pytest.mark.asyncio
+async def test_wheel_scroll_waits_until_offsets_settle(browser, site, tmp_path):
+    session, tab = browser
+    page = session._page(tab)
+    await session.navigate(tab, site + 'smooth')
+    observation = await session.observe(tab)
+    assert 'Bottom content' not in observation['text']
+    first = await session.act(tab, {'operation': 'scroll', 'observation_id': observation['id'], 'delta_y': 6000})
+    assert first['scroll']['settled'] is True and first['scroll']['moved']['y'] > 0 and first['scroll']['moved']['x'] == 0
+    assert first['scroll']['moved']['y'] == await page.evaluate('scrollY')  # actual, not the requested delta
+    bottom = await session.observe(tab, screenshot=True)  # immediately, no client sleep
+    assert 'Bottom content' in bottom['text'] and any(e['name'] == 'Bottom link' for e in bottom['elements'])
+    destination = Path(os.environ.get('BROWSER_PROOF_DIR', tmp_path))
+    destination.mkdir(parents=True, exist_ok=True)
+    (destination / 'scroll-settled-proof.png').write_bytes(base64.b64decode(bottom['screenshot']))
+    started = time.perf_counter()
+    end = await session.act(tab, {'operation': 'scroll', 'observation_id': bottom['id'], 'delta_y': 6000})
+    assert end['scroll'] == {'settled': True, 'moved': {'x': 0, 'y': 0}}  # end of page
+    assert time.perf_counter() - started < 1.0
+    observation = await session.observe(tab)
+    box = element(observation, 'Inner box')
+    window_before = await page.evaluate('scrollY')
+    inner = await session.act(tab, {'operation': 'scroll', 'observation_id': observation['id'], 'target': box['id'], 'delta_y': 300})
+    assert inner['scroll']['settled'] is True and inner['scroll']['moved']['y'] > 0
+    assert inner['scroll']['moved']['y'] == await page.evaluate("document.querySelector('[aria-label=\"Inner box\"]').scrollTop")
+    assert await page.evaluate('scrollY') == window_before
+
+
 @pytest_asyncio.fixture
 async def external_chrome(tmp_path):
     async with async_playwright() as pw:
@@ -664,6 +702,11 @@ async def external_chrome(tmp_path):
     finally:
         if process.returncode is None:
             process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), 5)
+            except asyncio.TimeoutError:
+                # Some headless Chrome builds ignore SIGTERM; never hang the fixture teardown.
+                process.kill()
         await process.wait()
 
 
