@@ -35,12 +35,12 @@
   "skills/browser-automation/SKILL.md"
  ],
  "features": {
-  "F1": "VERIFIED_awaiting_GitOwner_commit",
-  "F2": "not_started",
+  "F1": "COMMITTED 687cf22 (pushed)",
+  "F2": "VERIFIED_awaiting_GitOwner_commit",
   "F3": "not_started",
   "F4": "not_started"
  },
- "current_feature": "F1 navigation + act settle (commit: feat(browser): navigate owned tabs and settle after input)",
+ "current_feature": "F2 observation accuracy (commit: fix(observe): reject stale approvals early and flag covered targets)",
  "decisions": {
   "navigate_ownership": "BrowserSession.navigate accepts only pages in _owned (new_tab or popups of owned tabs) in both attached and isolated sessions; otherwise NotOwnedTabError(UnsafeActionError) code not_owned_tab, recommended_next_action new_tab",
   "navigate_url_rules": "Destination must pass BrowserSession._allowed_url (HTTP(S) with host or about:blank); service additionally applies web_url -> prohibited_url before any browser call",
@@ -51,7 +51,12 @@
   "settle_defaults": "settle_ms default 1000 for click/press/drag, 0 otherwise; zero still reports a navigation already started during dispatch. timeout_ms (1..120000, default 15000) validated for every operation; reload keeps its own navigation_status/wait_until",
   "navigation_result": "act result always includes navigation {started, status none|complete|timeout, url} (+reason when a started navigation did not commit or page closed, +timeout_ms diagnostic on timeout). It is a settle signal, never task success",
   "navigate_failure_service_cache": "Service drops tab cache on navigate success and on failures other than not_owned_tab/invalid_argument",
-  "result_extensions": "Additive to contract: navigation.reason (not_committed|page_closed) and navigation.diagnostic on timeout; NavigationFailedError code navigation_failed for hard goto failures"
+  "result_extensions": "Additive to contract: navigation.reason (not_committed|page_closed) and navigation.diagnostic on timeout; NavigationFailedError code navigation_failed for hard goto failures",
+  "f2_service_cache": "_forget_tab(sid,*tabs) drops service snapshots+pending for the tab after act/approved_act (success, or failure when the engine no longer holds the revision or the error is stale_observation), navigate, run (run tab, active_tab, popup_tabs/active_tab in steps; done BEFORE re-caching a paused run's fresh snapshot+pending), approved upload/download (always, finally), close_tab (success). Pre-input act failures where BrowserSession.holds_observation is still true keep the cache",
+  "f2_check_observation": "BrowserSession.check_observation(tab_id, observation_id, targets=()) under the lock: _snapshot + _validate incl. target-pixel comparison for visual targets among targets; no input. Service act calls it before minting approval_required; stale -> stale_observation, that observation and any pending for it removed from the service cache, no pending created. approved_act unchanged",
+  "f2_covered": "snapshot.js clipRect() (refactor of visible() returning the clipped box) + one elementFromPoint at the guard's default point (center of clipped box) with shadow-root descent and composed contains, mirroring _GUARD. Covered exported targets keep name/signature/bounds but operations=[] and covered:true. Operations are already in _semantic_digest, so overlays appearing/disappearing invalidate older revisions; signature unchanged (no extra fingerprint cost). Provider choices come from operations, so covered targets are excluded without touching providers.py (not owned). Guard remains authoritative (explicit x/y in a partly covered target, parent-document iframe overlays). Cost: one hit test per exported element within the existing max_elements/max_nodes budgets",
+  "f2_behavior_change": "An overlay appearing after observe now fails act as stale_observation (digest) instead of unsafe_action 'covered target'; test_stale_covered_wrong_tab_and_semantic_guards updated and a corner-overlay explicit-point case keeps proving the guard",
+  "f2_input_point": "Verification found wrapped inline links (Wikipedia) flagged covered because the guard's default point was the bounding-box center (on unrelated paragraph text); this was also a pre-existing guard false rejection. snapshot.js now defines state.inputPoint(el, clippedBox) = center of the largest visible getClientRects() fragment (<=64 fragments; single-fragment elements unchanged), used by both the covered flag and _GUARD's default point. Explicit x/y points unchanged"
  },
  "research": [
   {
@@ -86,9 +91,20 @@
    "agents/autonomy.json",
    "tests/test_service_stdio.py: subprocess StreamReader limit=64 MiB (LINE_LIMIT) fixes macOS 'Separator is found, but chunk is longer than limit' for screenshot JSON lines"
   ],
-  "cli_jsonl": "json_lines dispatch is generic (service.dispatch validates against mcp.TOOLS); no cli.py change needed. HTTP reuses mcp.TOOLS + service.dispatch"
+  "cli_jsonl": "json_lines dispatch is generic (service.dispatch validates against mcp.TOOLS); no cli.py change needed. HTTP reuses mcp.TOOLS + service.dispatch",
+  "F2": "implemented and verified 2026-10-10",
+  "F2_changed": [
+   "src/browser_automation/snapshot.js",
+   "src/browser_automation/browser.py",
+   "src/browser_automation/service.py",
+   "tests/test_browser.py",
+   "tests/test_service.py",
+   "docs/browser.md",
+   "docs/integrations.md",
+   "agents/autonomy.json"
+  ]
  },
- "requested_verification": "F1 done; next verification after F2 implementation",
+ "requested_verification": "F2 done; next verification after F3 implementation",
  "blockers": [],
  "verification": {
   "F1": {
@@ -117,6 +133,45 @@
     "latency_kind": "browser-only local tool latency; not provider/model latency"
    },
    "out_of_scope": "tests/test_service_omp.py::test_actual_omp_extension_load not run (local omp 18.2.1 rejects --no-ui; parent-designated out of scope)"
+  },
+  "F2": {
+   "date": "2026-10-10",
+   "environment": "macOS, Python 3.13 .venv, playwright 1.63.0, headless isolated Chromium (+throwaway CDP Chromium); no native user Chrome, no live provider",
+   "suite": {
+    "command": "BROWSER_PROOF_DIR=/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/proof-f2 BROWSER_INTEGRATION_TESTS=1 uv run --extra http pytest tests/test_browser.py tests/test_browser_visual.py tests/test_browser_observation.py tests/test_browser_context.py tests/test_page_state.py tests/test_agent.py tests/test_agent_surface.py tests/test_service.py tests/test_service_stdio.py tests/test_mcp_http_browser.py tests/test_network_surface.py --basetemp=/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/f2 -p no:cacheprovider",
+    "first_run": "161 passed, 92.07s",
+    "after_input_point_repair": "162 passed, 0 failed, 86.62s (adds test_wrapped_inline_link_uses_fragment_input_point)"
+   },
+   "screenshots_viewed": [
+    "/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/proof-f2/covered-proof.png (shade over 'Covered action', status Idle)",
+    "/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/proof-f2/uncovered-proof.png (shade removed, status 'Under clicked')"
+   ],
+   "real_pages": {
+    "script": "/private/tmp/claude-501/-Users-duongnguyen-Documents-personal-prjs-browser-automation/a3edb401-1d02-41d2-a073-7ff83209d77b/scratchpad/f2_real_pages.py (BrowserSession.launch headless, observe x3 per page, guard _point re-check of each covered element, no input)",
+    "hacker_news": {
+     "url": "https://news.ycombinator.com/",
+     "elements": 147,
+     "covered": 0,
+     "observe_ms": [
+      47.0,
+      33.3,
+      32.3
+     ]
+    },
+    "wikipedia": {
+     "url": "https://en.wikipedia.org/wiki/Web_browser",
+     "elements": 66,
+     "covered_before_repair": 3,
+     "covered_after_repair": 1,
+     "observe_ms": [
+      84.5,
+      75.0,
+      70.7
+     ],
+     "remaining_covered": "link 'HTTP' whose only visible fragment is a 0.53px sliver at the 720px viewport bottom edge; elementFromPoint returns null there and the act guard also rejects it ('covered target'); scrolling is required anyway"
+    },
+    "latency_kind": "browser-only DOM observe without screenshot; public sites, single run, network variance not controlled"
+   }
   }
  }
 }

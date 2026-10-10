@@ -208,7 +208,8 @@ _GUARD = """({token,node,point,signature,clip}) => {
  const r=e?e.getBoundingClientRect():null;
  let left=e?Math.max(clip.left,r.left):clip.left,top=e?Math.max(clip.top,r.top):clip.top,right=e?Math.min(clip.right,r.right):clip.right,bottom=e?Math.min(clip.bottom,r.bottom):clip.bottom;
  for(let p=e?.parentElement||e?.getRootNode().host;p;p=p.parentElement||p.getRootNode().host){const style=getComputedStyle(p),pr=p.getBoundingClientRect();if(style.display==='none'||Number(style.opacity)===0)return {error:'disabled or hidden target'};const clips=s.clipsOverflow(p);if(clips&&/hidden|clip|auto|scroll/.test(style.overflowX)){left=Math.max(left,pr.left+p.clientLeft);right=Math.min(right,pr.left+p.clientLeft+p.clientWidth);}if(clips&&/hidden|clip|auto|scroll/.test(style.overflowY)){top=Math.max(top,pr.top+p.clientTop);bottom=Math.min(bottom,pr.top+p.clientTop+p.clientHeight);}}
- const x=point?point.x:(left+right)/2, y=point?point.y:(top+bottom)/2;
+ const fallback=e&&!point&&right>left&&bottom>top?s.inputPoint(e,{left,top,right,bottom}):{x:(left+right)/2,y:(top+bottom)/2};
+ const x=point?point.x:fallback.x, y=point?point.y:fallback.y;
  if(right<=left||bottom<=top||x<left||x>=right||y<top||y>=bottom) return {error:'target clipped outside viewport'};
  if(!Number.isFinite(x)||!Number.isFinite(y)||x<0||y<0||x>=innerWidth||y>=innerHeight) return {error:'target outside viewport'};
  if(e && (x<r.left||x>r.right||y<r.top||y>r.bottom)) return {error:'point outside target'};
@@ -1077,6 +1078,22 @@ class BrowserSession:
             current = current.parent_frame
         return result['x']+ox, result['y']+oy
 
+
+    async def check_observation(self, tab_id: str, observation_id: str, targets: list[str] | tuple[str, ...] = ()) -> None:
+        """Revalidate a revision exactly as act would before input, without sending any input.
+
+        Visual targets also get the target-pixel comparison (one extra screenshot).
+        Occlusion/geometry at the input point stays the act guard's job.
+        """
+        async with self._lock:
+            snapshot = self._snapshot(tab_id, observation_id)
+            visual = tuple(t for t in (snapshot['targets'].get(key) for key in targets) if t is not None and t.visual)
+            await self._validate(snapshot, visual_targets=visual)
+
+    def holds_observation(self, tab_id: str, observation_id: Any) -> bool:
+        """Whether this tab revision is still cached (act invalidates it before dispatching input)."""
+        snapshot = self._snapshots.get(observation_id) if isinstance(observation_id, str) else None
+        return snapshot is not None and snapshot['tab'] == tab_id
 
     def _invalidate(self, tab_id: str) -> None:
         for revision, snapshot in list(self._snapshots.items()):

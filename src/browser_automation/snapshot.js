@@ -24,19 +24,43 @@
     return true;
   };
   state.clipsOverflow = clipsOverflow;
-  const visible = (el, rect = el.getBoundingClientRect()) => {
+  // Visible clipped rectangle (viewport, frame clip and overflow ancestors), or null.
+  const clipRect = (el, rect = el.getBoundingClientRect()) => {
     const style = getComputedStyle(el);
-    if (style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity) === 0 || rect.width <= 0 || rect.height <= 0) return false;
+    if (style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity) === 0 || rect.width <= 0 || rect.height <= 0) return null;
     let left=Math.max(viewportClip.left,rect.left), top=Math.max(viewportClip.top,rect.top), right=Math.min(viewportClip.right,rect.right), bottom=Math.min(viewportClip.bottom,rect.bottom);
     for(let parent=el.parentElement||el.getRootNode().host;parent;parent=parent.parentElement||parent.getRootNode().host){
       const s=getComputedStyle(parent),r=parent.getBoundingClientRect();
-      if(s.display==='none'||Number(s.opacity)===0) return false;
+      if(s.display==='none'||Number(s.opacity)===0) return null;
       // Boxless custom hosts and display:contents do not establish clipping boxes.
       const clips = clipsOverflow(parent);
       if(clips && /hidden|clip|auto|scroll/.test(s.overflowX)){left=Math.max(left,r.left+parent.clientLeft);right=Math.min(right,r.left+parent.clientLeft+parent.clientWidth);}
       if(clips && /hidden|clip|auto|scroll/.test(s.overflowY)){top=Math.max(top,r.top+parent.clientTop);bottom=Math.min(bottom,r.top+parent.clientTop+parent.clientHeight);}
     }
-    return right>left&&bottom>top;
+    return right>left&&bottom>top ? {left,top,right,bottom} : null;
+  };
+  const visible = (el, rect) => clipRect(el, rect) !== null;
+  // Mirrors the act guard's default input point (center of the clipped visible
+  // box) and composed-tree hit test, so a covered flag predicts its rejection.
+  const containsComposed = (parent, child) => {while(child){if(child===parent)return true;child=child.parentNode||child.host;}return false;};
+  // Default input point shared with the act guard: the center of the element's largest
+  // visible box fragment, so a wrapped inline link is hit on its own text rather than at
+  // the center of its bounding box (which can be unrelated paragraph text).
+  state.inputPoint = (el, box) => {
+    let best=null, area=0;
+    const rects=el.getClientRects();
+    if(rects.length>1) for(let i=0;i<rects.length&&i<64;i++){
+      const c=rects[i],l=Math.max(box.left,c.left),t=Math.max(box.top,c.top),r=Math.min(box.right,c.right),b=Math.min(box.bottom,c.bottom);
+      if(r>l&&b>t&&(r-l)*(b-t)>area){area=(r-l)*(b-t);best={x:(l+r)/2,y:(t+b)/2};}
+    }
+    return best || {x:(box.left+box.right)/2, y:(box.top+box.bottom)/2};
+  };
+  const covered = (el, box) => {
+    const {x,y}=state.inputPoint(el, box);
+    if(!(x>=0&&y>=0&&x<innerWidth&&y<innerHeight)) return true;
+    let hit=document.elementFromPoint(x,y);
+    for(let depth=0;hit?.shadowRoot&&depth<32;depth++){const inner=hit.shadowRoot.elementFromPoint(x,y);if(!inner||inner===hit)break;hit=inner;}
+    return !containsComposed(el,hit);
   };
   const renderedText = (root, limit=300) => {
     const chunks=[];let chars=0,nodes=0;
@@ -84,7 +108,8 @@
       if (++visitedNodes > maxNodes) { sourceTruncated = true; break; }
       if (['SCRIPT','STYLE','NOSCRIPT','TEMPLATE'].includes(el.tagName)) continue;
       if(el.matches('input,select,textarea') || el.isContentEditable) fields.push(state.fingerprint(el));
-      const isVisible = visible(el);
+      const box = clipRect(el);
+      const isVisible = box !== null;
       // Offscreen drafts can also be destroyed by reload. Export flags, not values.
       const editable = el.isContentEditable || el.matches('textarea') ||
         (el.matches('input') && !['hidden','button','submit','reset','checkbox','radio','file','range','color','image'].includes(el.type));
@@ -120,6 +145,11 @@
           live.set(id,el);
           const r = el.getBoundingClientRect();
           if (elements.length < maxElements) {
+            // One hit test per exported target. Every targeted operation passes the
+            // guard's hit test, so a covered element advertises none; the changed
+            // operations also change the semantic digest when an overlay comes or goes.
+            const isCovered = covered(el, box);
+            if (isCovered) ops.length = 0;
             const isSub = !!el.form && (['submit','image'].includes(type) || (tag === 'button' && (el.type === 'submit' || !el.getAttribute('type'))));
             const maxOpts = 50;
             const rawOpts = tag === 'select' ? Array.from(el.options) : [];
@@ -131,6 +161,7 @@
             }));
             elements.push({id,signature:state.fingerprint(el),role,name:label(el),value:sensitive(el)?'[REDACTED]':String(el.value || '').slice(0,1000),operations:[...new Set(ops)],bounds:{x:r.x,y:r.y,width:r.width,height:r.height},sensitive:sensitive(el),input_type:tag==='button'?(el.type||'submit'):(el.type||type),is_submit:isSub,tag,href:el.href||null,form_action:el.hasAttribute('formaction')?el.formAction:el.form?.action||null,form_method:el.hasAttribute('formmethod')?el.formMethod:el.form?.method||null,multiple:tag==='select'?!!el.multiple:(tag==='input'&&type==='file')?!!el.multiple:false,options:opts,omitted_options:Math.max(0, rawOpts.length - maxOpts),selected_values:tag==='select'?Array.from(el.selectedOptions||[]).map(o=>o.value):undefined});
             if(['checkbox','radio'].includes(type)) elements.at(-1).checked = !!el.checked;
+            if(isCovered) elements.at(-1).covered = true;
           } else {
             omittedElements++;
             sourceTruncated = true;

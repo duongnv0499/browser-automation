@@ -27,6 +27,15 @@ NAV_FIXTURE = b'''<!doctype html><html><head><title>Navigation fixture</title><s
 </body></html>'''
 
 
+OVERLAY_FIXTURE = b'''<!doctype html><html><head><title>Overlay fixture</title><style>body{font:18px sans-serif;margin:10px}button{display:block;margin:0 0 60px 0;padding:8px}</style></head><body>
+<button onclick="document.querySelector('#out').textContent='Under clicked'">Covered action</button>
+<button onclick="document.querySelector('#out').textContent='Free clicked'">Free action</button>
+<div id="out" role="status">Idle</div>
+<p id="para" style="width:300px;font:18px monospace;margin:0">aaaaaaaaaaaaaaaaaa <a id="wrapped" href="#wrapped" onclick="document.querySelector('#out').textContent='Wrapped clicked'">bbbbbbb cccccccc</a> dddddddddddddddddd</p>
+<div id="shade" style="position:absolute;left:0;top:0;width:400px;height:70px;background:rgba(0,0,0,.45)"></div>
+</body></html>'''
+
+
 @pytest_asyncio.fixture
 async def site():
     port = 0
@@ -57,6 +66,8 @@ async def site():
                 body = b'<html><body><button onclick="this.textContent=\'Frame clicked\'">Frame button</button></body></html>'
             elif route == '/popup':
                 body = b'<html><head><title>Owned popup</title></head><body>Popup opened</body></html>'
+            elif route == '/overlay':
+                body = OVERLAY_FIXTURE
             elif route == '/nav':
                 body = NAV_FIXTURE
             elif route == '/slow':
@@ -150,8 +161,24 @@ async def test_stale_covered_wrong_tab_and_semantic_guards(browser):
     observation = await session.observe(tab)
     target = element(observation,'Safe click')['id']
     await page.evaluate("const e=document.createElement('div');e.style='position:fixed;inset:0;background:rgba(0,0,0,.2);z-index:999999';document.body.append(e)")
-    with pytest.raises(UnsafeActionError, match='covered'):
+    # A new overlay changes advertised operations, so the old revision is stale.
+    with pytest.raises(StaleObservationError):
         await session.act(tab, {'operation':'click','target':target,'observation_id':observation['id']})
+    observation = await session.observe(tab)
+    covered = element(observation,'Safe click')
+    assert covered['covered'] is True and covered['operations'] == []
+    with pytest.raises(UnsafeActionError, match='unsupported'):
+        await session.act(tab, {'operation':'click','target':covered['id'],'observation_id':observation['id']})
+    await page.reload()
+    # The guard stays authoritative at the actual input point: a corner overlay leaves
+    # the default center actionable, but an explicit covered point is still rejected.
+    await page.evaluate("const r=document.querySelector('#safe').getBoundingClientRect();const e=document.createElement('div');e.style=`position:fixed;left:${r.left}px;top:${r.top}px;width:6px;height:6px;z-index:999999`;document.body.append(e)")
+    observation = await session.observe(tab)
+    safe = element(observation,'Safe click')
+    assert 'covered' not in safe and 'click' in safe['operations']
+    with pytest.raises(UnsafeActionError, match='covered'):
+        await session.act(tab, {'operation':'click','target':safe['id'],'observation_id':observation['id'],'x':safe['bounds']['x']+2,'y':safe['bounds']['y']+2})
+    assert await page.locator('#out').inner_text() == 'Waiting'
     await page.reload()
     observation = await session.observe(tab)
     target = element(observation,'Safe click')['id']
@@ -319,6 +346,87 @@ async def test_act_settle_reports_navigation_without_full_timeout(browser, site)
     assert slow['navigation']['started'] is True and slow['navigation']['status'] == 'timeout'
     assert slow['navigation']['diagnostic']['code'] == 'navigation_timeout'
     assert any(t['id'] == tab for t in await session.tabs())
+
+
+@pytest.mark.asyncio
+async def test_covered_targets_flagged_without_operations_and_restored(browser, site, tmp_path):
+    from browser_automation.providers import action_candidates
+    session, tab = browser
+    page = session._page(tab)
+    await session.navigate(tab, site + 'overlay')
+    observation = await session.observe(tab, screenshot=True)
+    under, free = element(observation, 'Covered action'), element(observation, 'Free action')
+    assert under['covered'] is True and under['operations'] == []
+    assert 'covered' not in free and {'click', 'hover', 'press'} <= set(free['operations'])
+    targets = {action.get('target') for action in action_candidates(observation).values()}
+    assert under['id'] not in targets and free['id'] in targets
+    destination = Path(os.environ.get('BROWSER_PROOF_DIR', tmp_path))
+    destination.mkdir(parents=True, exist_ok=True)
+    (destination / 'covered-proof.png').write_bytes(base64.b64decode(observation['screenshot']))
+    with pytest.raises(UnsafeActionError, match='unsupported'):
+        await session.act(tab, {'operation': 'click', 'observation_id': observation['id'], 'target': under['id']})
+    await session.act(tab, {'operation': 'click', 'observation_id': observation['id'], 'target': free['id'], 'settle_ms': 0})
+    assert await page.locator('#out').inner_text() == 'Free clicked'
+    observation = await session.observe(tab)
+    await page.evaluate("document.querySelector('#shade').remove()")
+    # Removing the overlay restores operations, which also makes older revisions stale.
+    with pytest.raises(StaleObservationError):
+        await session.check_observation(tab, observation['id'])
+    with pytest.raises(StaleObservationError):
+        await session.act(tab, {'operation': 'click', 'observation_id': observation['id'], 'target': element(observation, 'Free action')['id']})
+    restored = await session.observe(tab, screenshot=True)
+    under = element(restored, 'Covered action')
+    assert 'covered' not in under and 'click' in under['operations']
+    await session.check_observation(tab, restored['id'], [under['id']])
+    await session.act(tab, {'operation': 'click', 'observation_id': restored['id'], 'target': under['id'], 'settle_ms': 0})
+    proof = await session.observe(tab, screenshot=True)
+    assert 'Under clicked' in proof['text']
+    (destination / 'uncovered-proof.png').write_bytes(base64.b64decode(proof['screenshot']))
+
+
+@pytest.mark.asyncio
+async def test_wrapped_inline_link_uses_fragment_input_point(browser, site):
+    session, tab = browser
+    page = session._page(tab)
+    await session.navigate(tab, site + 'overlay')
+    # Precondition: the link wraps and its bounding-box center is on unrelated paragraph text.
+    probe = await page.evaluate("""()=>{const a=document.querySelector('#wrapped'),r=a.getBoundingClientRect();const h=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {fragments:a.getClientRects().length,centerOnLink:a.contains(h)};}""")
+    assert probe == {'fragments': 2, 'centerOnLink': False}
+    observation = await session.observe(tab)
+    link = element(observation, 'bbbbbbb cccccccc')
+    assert 'covered' not in link and 'click' in link['operations']
+    result = await session.act(tab, {'operation': 'click', 'observation_id': observation['id'], 'target': link['id']})
+    assert result['navigation']['url'].endswith('#wrapped')
+    assert await page.locator('#out').inner_text() == 'Wrapped clicked'
+
+
+@pytest.mark.asyncio
+async def test_service_rejects_stale_approval_and_drops_tab_cache(site):
+    from browser_automation.service import BrowserService, ServiceError
+    service = BrowserService()
+    try:
+        sid = (await service.dispatch('launch', {'headless': True}))['session_id']
+        tab = (await service.dispatch('new_tab', {'session_id': sid, 'url': site + 'overlay'}))['tab']['id']
+        args = {'session_id': sid, 'tab_id': tab}
+        observation = await service.dispatch('observe', args)
+        click = {'operation': 'click', 'target': element(observation, 'Free action')['id'], 'observation_id': observation['id']}
+        await service.sessions[sid]._page(tab).evaluate("document.querySelector('#out').textContent='Changed elsewhere'")
+        with pytest.raises(StaleObservationError):
+            await service.dispatch('act', {**args, 'action': click})
+        assert not service.pending_actions and (sid, observation['id']) not in service.snapshots
+        observation = await service.dispatch('observe', args)
+        click['observation_id'] = observation['id']
+        paused = await service.dispatch('act', {**args, 'action': click})
+        assert paused['status'] == 'approval_required' and set(service.pending_actions) == {(sid, tab, observation['id'])}
+        executed = await service.dispatch('act', {**args, 'action': {'observation_id': observation['id'], 'operation': 'wait', 'seconds': 0}})
+        assert executed['navigation']['started'] is False
+        assert not service.pending_actions and not any(key[0] == sid for key in service.snapshots)
+        with pytest.raises(ServiceError) as old:
+            await service.dispatch('act', {**args, 'action': {'observation_id': observation['id'], 'operation': 'wait', 'seconds': 0}})
+        assert old.value.code == 'unknown_observation'
+        assert await service.sessions[sid]._page(tab).locator('#out').inner_text() == 'Changed elsewhere'
+    finally:
+        await service.close()
 
 
 @pytest_asyncio.fixture

@@ -30,6 +30,14 @@ class Session:
         self.closed = True
     async def close_tab(self, tab_id):
         pass
+    stale = False
+    async def check_observation(self, tab_id, observation_id, targets=()):
+        self.checked = (tab_id, observation_id, list(targets))
+        if self.stale:
+            from browser_automation.browser import StaleObservationError
+            raise StaleObservationError("Document, visible semantics, or form state changed; observe again")
+    def holds_observation(self, tab_id, observation_id):
+        return False
     async def navigate(self, tab_id, url, wait_until="domcontentloaded", timeout_ms=15000):
         self.navigated = (tab_id, url, wait_until, timeout_ms)
         return {"tab": {"id": tab_id, "url": url, "title": "Moved"}, "navigation_status": "complete", "wait_until": wait_until}
@@ -206,3 +214,78 @@ async def test_navigate_drops_tab_observations_and_paused_approvals():
         with pytest.raises(ServiceError):
             validate_arguments("act", {"session_id": "s", "tab_id": "t", "action": {"observation_id": "r", "operation": "click", "target": "x", "settle_ms": settle}})
     validate_arguments("act", {"session_id": "s", "tab_id": "t", "action": {"observation_id": "r", "operation": "click", "target": "x", "settle_ms": 0}})
+
+
+@pytest.mark.asyncio
+async def test_stale_observation_rejected_before_minting_approval():
+    service, session = service_with_session()
+    await service.dispatch("observe", {"session_id": "s", "tab_id": "t"})
+    session.stale = True
+    with pytest.raises(Exception) as stale:
+        await service.dispatch("act", {"session_id": "s", "tab_id": "t", "action": {"observation_id": "revision", "operation": "click", "target": "button"}})
+    assert stale.value.code == "stale_observation"
+    assert session.checked == ("t", "revision", ["button"])
+    assert not service.pending_actions and ("s", "revision") not in service.snapshots
+    session.stale = False
+    await service.dispatch("observe", {"session_id": "s", "tab_id": "t"})
+    paused = await service.dispatch("act", {"session_id": "s", "tab_id": "t", "action": {"observation_id": "revision", "operation": "click", "target": "button"}})
+    assert paused["status"] == "approval_required" and len(service.pending_actions) == 1
+
+
+@pytest.mark.asyncio
+async def test_tab_cache_dropped_after_input_commands():
+    service, session = service_with_session()
+    await service.dispatch("observe", {"session_id": "s", "tab_id": "t"})
+    executed = await service.dispatch("act", {"session_id": "s", "tab_id": "t", "action": {"observation_id": "revision", "operation": "wait", "seconds": 0}})
+    assert executed["executed"]["operation"] == "wait" and not service.snapshots
+    with pytest.raises(ServiceError) as old:
+        await service.dispatch("act", {"session_id": "s", "tab_id": "t", "action": {"observation_id": "revision", "operation": "wait"}})
+    assert old.value.code == "unknown_observation"
+    async def failing_act(tab_id, action):
+        raise RuntimeError("input may have been dispatched")
+    session.act = failing_act
+    await service.dispatch("observe", {"session_id": "s", "tab_id": "t"})
+    with pytest.raises(RuntimeError):
+        await service.dispatch("act", {"session_id": "s", "tab_id": "t", "action": {"observation_id": "revision", "operation": "wait"}})
+    assert not service.snapshots
+    await service.dispatch("observe", {"session_id": "s", "tab_id": "t"})
+    await service.dispatch("close_tab", {"session_id": "s", "tab_id": "t"})
+    assert not service.snapshots
+
+
+@pytest.mark.asyncio
+async def test_preinput_failure_keeps_cache_when_engine_still_holds_revision():
+    service, session = service_with_session()
+    from browser_automation.browser import UnsafeActionError
+    async def covered(tab_id, action):
+        raise UnsafeActionError("covered target")
+    session.act = covered
+    session.holds_observation = lambda tab_id, observation_id: True
+    await service.dispatch("observe", {"session_id": "s", "tab_id": "t"})
+    with pytest.raises(UnsafeActionError):
+        await service.dispatch("act", {"session_id": "s", "tab_id": "t", "action": {"observation_id": "revision", "operation": "wait"}})
+    assert ("s", "revision") in service.snapshots
+
+
+@pytest.mark.asyncio
+async def test_paused_run_keeps_fresh_snapshot_and_pending_action(monkeypatch):
+    from browser_automation.agent import BrowserAgent
+    from browser_automation.providers import DecisionProvider
+    class Provider:
+        capabilities = {"vision": False}
+        async def close(self):
+            pass
+    monkeypatch.setattr(DecisionProvider, "from_env", classmethod(lambda cls, **kwargs: Provider()))
+    paused_observation = {"id": "fresh", "tab_id": "t", "text": "x", "elements": [], "screenshot": "PNG"}
+    async def run(self, tab_id, goal):
+        return {"status": "approval_required", "steps": [{"action": {"operation": "click"}, "result": {"popup_tabs": ["popup"]}}],
+                "observation": paused_observation, "active_tab": tab_id,
+                "approval": {"tab_id": tab_id, "observation_id": "fresh", "action": {"observation_id": "fresh", "operation": "click", "target": "button"}, "reason": "risky"}}
+    monkeypatch.setattr(BrowserAgent, "run", run)
+    service, session = service_with_session()
+    await service.dispatch("observe", {"session_id": "s", "tab_id": "t"})
+    service.snapshots[("s", "popup-old")] = {"id": "popup-old", "tab_id": "popup"}
+    result = await service.dispatch("run", {"session_id": "s", "tab_id": "t", "goal": "Pause for approval"})
+    assert result["host_approval"]["binding"]["observation_id"] == "fresh"
+    assert set(service.snapshots) == {("s", "fresh")} and "screenshot" not in service.snapshots[("s", "fresh")]
+    assert set(service.pending_actions) == {("s", "t", "fresh")}

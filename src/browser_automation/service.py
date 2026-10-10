@@ -68,12 +68,27 @@ class BrowserService:
                 return True
         return False
 
-    def _forget_tab(self, sid: str, tab_id: str) -> None:
-        """Drop cached observations and paused approvals bound to a tab's previous document."""
-        for key in [key for key, snapshot in self.snapshots.items() if key[0] == sid and snapshot.get("tab_id") == tab_id]:
+    def _forget_tab(self, sid: str, *tab_ids: str | None) -> None:
+        """Drop cached observations and paused approvals bound to tabs whose document may have changed."""
+        tabs = {tab for tab in tab_ids if tab}
+        for key in [key for key, snapshot in self.snapshots.items() if key[0] == sid and snapshot.get("tab_id") in tabs]:
             del self.snapshots[key]
-        for key in [key for key in self.pending_actions if key[0] == sid and key[1] == tab_id]:
+        for key in [key for key in self.pending_actions if key[0] == sid and key[1] in tabs]:
             del self.pending_actions[key]
+
+    async def _execute_act(self, sid: str, browser, tab_id: str, action: dict) -> dict:
+        """Run a snapshot-bound action; forget the tab's cache once input may have been dispatched."""
+        try:
+            result = await browser.act(tab_id, action)
+        except Exception as exc:
+            # The engine invalidates its revisions right before input; a revision it
+            # still holds (and that is not stale) proves no input was dispatched.
+            holds = getattr(browser, "holds_observation", None)
+            if getattr(exc, "code", None) == "stale_observation" or holds is None or not holds(tab_id, action.get("observation_id")):
+                self._forget_tab(sid, tab_id)
+            raise
+        self._forget_tab(sid, tab_id)
+        return result
 
     async def dispatch(self, command: str, arguments: dict | None = None, *, on_progress=None) -> dict:
         args = dict(arguments or {})
@@ -179,6 +194,15 @@ class BrowserService:
                     raise ServiceError("unknown_observation", "Observe this tab before acting")
                 reason = BrowserAgent._approval_reason(action, snapshot, recovery_policy=self.recovery_policy)
                 if reason:
+                    # Revalidate (no input) before minting a pending approval: a stale
+                    # observation fails now instead of after the human approves it.
+                    try:
+                        await browser.check_observation(args["tab_id"], action["observation_id"], targets=[t for t in (action.get("target"), action.get("to_target")) if isinstance(t, str)])
+                    except Exception as exc:
+                        if getattr(exc, "code", None) == "stale_observation":
+                            self.snapshots.pop((sid, action["observation_id"]), None)
+                            self.pending_actions.pop((sid, args["tab_id"], action["observation_id"]), None)
+                        raise
                     import copy
                     binding = {"session_id": sid, "tab_id": args["tab_id"], "observation_id": action["observation_id"],
                                "action": copy.deepcopy(action), "reason": reason}
@@ -195,7 +219,7 @@ class BrowserService:
                         self.pending_actions.pop(next(iter(self.pending_actions)))
                     return {"status": "approval_required", "binding": binding, "expires_at": expiry,
                             "host_command": "browser-agent approve --binding-file binding.json --approval-file /path/to/approvals.json", "resume_tool": "approved_act"}
-                return await browser.act(args["tab_id"], action)
+                return await self._execute_act(sid, browser, args["tab_id"], action)
             if command == "approved_act":
                 key = (sid, args["tab_id"], args["observation_id"])
                 pending = self.pending_actions.get(key)
@@ -204,9 +228,10 @@ class BrowserService:
                 if not self._approve(pending["binding"], args["approval_token"]):
                     raise ServiceError("approval_required", "Exact host approval token required")
                 del self.pending_actions[key]
-                return await browser.act(args["tab_id"], pending["binding"]["action"])
+                return await self._execute_act(sid, browser, args["tab_id"], pending["binding"]["action"])
             if command == "close_tab":
                 await browser.close_tab(args["tab_id"])
+                self._forget_tab(sid, args["tab_id"])
                 return {"closed_tab": args["tab_id"]}
             if command in {"upload", "download"}:
                 if not self.files_directory:
@@ -219,9 +244,13 @@ class BrowserService:
                 if not self._approve(binding, args.get("approval_token")):
                     return {"status": "approval_required", "binding": binding, "expires_at": time.time() + 300,
                             "host_command": "browser-agent approve --binding-file binding.json --approval-file /path/to/approvals.json"}
-                if command == "upload":
-                    return await browser.upload(args["tab_id"], args["observation_id"], args["target"], args["paths"], allowed_directory=self.files_directory, approved=True)
-                return await browser.download(args["tab_id"], args["action"], args["destination"], allowed_directory=self.files_directory, approved=True)
+                try:
+                    if command == "upload":
+                        return await browser.upload(args["tab_id"], args["observation_id"], args["target"], args["paths"], allowed_directory=self.files_directory, approved=True)
+                    return await browser.download(args["tab_id"], args["action"], args["destination"], allowed_directory=self.files_directory, approved=True)
+                finally:
+                    # Approved transfers may set files or click; prior revisions are no longer trusted.
+                    self._forget_tab(sid, args["tab_id"])
             if command == "run":
                 from .agent import BrowserAgent
                 from .providers import DecisionProvider
@@ -233,7 +262,19 @@ class BrowserService:
                     if screenshot is None:
                         screenshot = provider.capabilities["vision"]
                     agent = BrowserAgent(browser, provider, max_steps=args.get("max_steps", 50), approval=approve, screenshot=screenshot, on_progress=on_progress, recovery_policy=self.recovery_policy, interpret_visual=args.get("interpret_visual", False))
-                    result = await agent.run(args["tab_id"], args["goal"])
+                    try:
+                        result = await agent.run(args["tab_id"], args["goal"])
+                    except BaseException:
+                        self._forget_tab(sid, args["tab_id"])
+                        raise
+                    # Forget every tab the run may have driven BEFORE caching its paused state.
+                    touched = {args["tab_id"], result.get("active_tab")}
+                    for step in result.get("steps", []):
+                        outcome = step.get("result") if isinstance(step, dict) else None
+                        if isinstance(outcome, dict):
+                            touched.update(outcome.get("popup_tabs", []))
+                            touched.add(outcome.get("active_tab"))
+                    self._forget_tab(sid, *touched)
                     if result.get("status") == "approval_required" and result.get("approval"):
                         binding = {"session_id": sid, **result["approval"]}
                         cached = dict(result["observation"])
