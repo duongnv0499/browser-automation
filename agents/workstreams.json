@@ -393,7 +393,8 @@
         "owner": "Autonomy",
         "commit": "feat(observe): compact observation output for agent clients",
         "scope": "observe detail compact|full (default compact), visual_regions (default false), text_scope viewport|document; full == current output; run result compacted unless detail=full; BrowserAgent/provider observations unchanged",
-        "status": "pending"
+        "status": "committed 5aae8c3, pushed origin/main 2026-10-10",
+        "verification": "Autonomy 2026-10-10 macOS: same 11-file scoped suite -> 165 passed, 0 failed in 92.49s. Real pages (single runs, uncontrolled network): HN full 84,122 B -> compact 26,805 B (31.9%), Wikipedia 38,975 B -> 12,201 B (31.3%); with screenshot 26.5% / 21.8%; compact observe 33-65 ms (browser-only)"
       },
       {
         "id": "F4",
@@ -486,9 +487,16 @@
       {
         "hash": "481041a",
         "message": "fix(observe): reject stale approvals early and flag covered targets"
+      },
+      {
+        "hash": "5aae8c3",
+        "message": "feat(observe): compact observation output for agent clients"
       }
     ],
-    "status": "F2 committed 481041a; F3 (compact observations) pending"
+    "status": "F3 committed 5aae8c3; F4 (host approval modes) pending",
+    "open_followups": [
+      "Intermittent stale_observation (2/~30) on screenshot observe while Wikipedia still loading; pre-existing revalidation behaviour noted during F3 verification, tracked for follow-up"
+    ]
   },
   "network_devtools_phase_2026_10_09": {
     "feature": "network DevTools capabilities 2026-10-09",
@@ -498,7 +506,7 @@
   },
   "current_phase": {
     "feature": "autonomy round 2026-10-10",
-    "phase": "F2 committed 481041a and pushed; F3 (compact observation output) pending with Autonomy worker",
+    "phase": "F3 committed 5aae8c3 and pushed; F4 (host approval modes) pending with Autonomy worker",
     "active_section": "autonomy_round_2026_10_10",
     "active_tracker": "agents/autonomy.json",
     "historical_sections": "network_devtools_phase_2026_10_09 and earlier sections remain historical evidence, not acceptance of this round"
