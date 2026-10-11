@@ -426,7 +426,7 @@
         "owner": "Harness",
         "commit": "docs(release): document autonomy round and verification",
         "scope": "README, CHANGELOG, docs/architecture.md, docs/research.md evidence, install.md (BROWSER_APPROVAL_MODE in MCP registration examples), skills/browser-automation/SKILL.md, AGENTS.md security wording (explicit approval = per-action host token OR host-configured standing approval mode; critical payment/credential actions always per-action), agents/workstreams.json",
-        "status": "committed in docs(release) commit (hash reported by GitOwner handoff; a commit cannot embed its own hash), pushed origin/main 2026-10-11",
+        "status": "committed ec05fe8, pushed origin/main 2026-10-11",
         "changed": [
           "AGENTS.md",
           "README.md",
@@ -535,7 +535,7 @@
         "message": "fix(act): wait for wheel scrolling to settle"
       }
     ],
-    "status": "Complete except open blocker: F1-F4c and F5 docs committed and pushed; 3 attached-external-Chrome tests await rerun with unlocked screen",
+    "status": "Complete: F1-F4c and F5 docs (ec05fe8) committed and pushed; attached-external-Chrome rerun after F4c passed",
     "open_followups": [
       "Intermittent stale_observation (2/~30) on screenshot observe while Wikipedia still loading; pre-existing revalidation behaviour noted during F3 verification, tracked for follow-up -> addressed by F4b 3e598bb"
     ],
@@ -547,9 +547,12 @@
       "parent_mcp_session": "standard: Add ran (ordinary, audited), Delete all paused (consequential), password fill paused (critical); autonomous: Delete all ran, password fill paused; link/navigate/HN flows ran",
       "limits": "No native personal Chrome attach, no paid/live model call, no competitor comparison; real-site measurements browser-only single runs on uncontrolled network"
     },
-    "open_blockers": [
-      "Rerun tests/test_browser.py::test_attached_disconnect_preserves_user_tabs, ::test_navigate_refuses_preexisting_user_tab, ::test_native_discovery_requires_consent_and_chrome_optin with the macOS screen unlocked (not rerun after F4c 1d1b9cd; passed at e8d79f9)"
-    ]
+    "attached_rerun_2026_10_11": {
+      "commit": "ec05fe8 (after F4c)",
+      "command": "BROWSER_INTEGRATION_TESTS=1 uv run --extra http pytest tests/test_browser.py -k \"attached_disconnect or preexisting_user_tab or native_discovery\"",
+      "result": "3 passed, 15 deselected in 6.43s (macOS screen unlocked)"
+    },
+    "open_blockers": []
   },
   "network_devtools_phase_2026_10_09": {
     "feature": "network DevTools capabilities 2026-10-09",
@@ -559,7 +562,7 @@
   },
   "current_phase": {
     "feature": "autonomy round 2026-10-10/11",
-    "phase": "Complete except open blocker (3 attached-external-Chrome tests not rerun after F4c because the macOS screen was locked). Commits 28fd973 bootstrap, 687cf22 F1, 481041a F2, 5aae8c3 F3, cb059ae F4, 3e598bb F4b, 1d1b9cd F4c, then docs(release) F5; unified gate 273 passed/1 deselected at e8d79f9",
+    "phase": "Complete. Commits 28fd973 bootstrap, 687cf22 F1, 481041a F2, 5aae8c3 F3, cb059ae F4, 3e598bb F4b, 1d1b9cd F4c, ec05fe8 F5; unified gate 273 passed/1 deselected at e8d79f9; 3 attached-external-Chrome tests rerun at ec05fe8: 3 passed",
     "active_section": "autonomy_round_2026_10_10",
     "active_tracker": "agents/autonomy.json",
     "historical_sections": "network_devtools_phase_2026_10_09 and earlier sections remain historical evidence, not acceptance of this round"
